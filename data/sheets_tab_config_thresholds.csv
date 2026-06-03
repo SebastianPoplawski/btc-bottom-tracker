@@ -1,0 +1,7 @@
+indicator,operator,threshold_value,threshold_value2,weight,active,description
+mvrv_z_score,lt,0,,1.0,TRUE,Dno: MVRV Z < 0
+nupl,lt,0,,1.0,TRUE,Dno: NUPL < 0 (kapitulacja)
+price_to_200w_ratio,lte,1.05,,1.0,TRUE,Dno: cena <= ~105% 200W MA
+whale_accumulating,is_true,,,1.0,TRUE,Dno: reczna flaga TRUE; ref. Exchange Whale Ratio 72h MA < 0.85
+fear_greed,lt,25,,0.5,TRUE,Dno: F&G < 25 = pasmo Extreme Fear alternative.me (0-24); niska waga
+days_since_ath,between,300,400,1.0,TRUE,Dno: ~10-13 mies. od ATH

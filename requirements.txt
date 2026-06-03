@@ -1,0 +1,42 @@
+# ============================================================================
+# BTC Bottom Tracker — zalezosci (Python 3.14)
+# ----------------------------------------------------------------------------
+# Strategia: przypinamy bezposrednie zaleznosci. Zaleznosci binarne
+# instalowane "po drodze" (numpy, pyarrow, protobuf) pip dobierze sam do
+# Pythona 3.14 — dzieki temu unikamy braku gotowych wheeli.
+#
+# Po PIERWSZEJ udanej instalacji zrob lock pelnego zestawu:
+#     pip freeze > requirements.lock.txt
+#
+# Gdyby ktoras paczka NIE chciala sie zbudowac na 3.14 (rzadkie):
+#   1) zamien jej linie na sama nazwe (bez ==wersji),
+#   2) `pip install -r requirements.txt`,
+#   3) `pip freeze > requirements.lock.txt`.
+# ============================================================================
+
+# --- UI (warstwa prezentacji) ---
+streamlit==1.55.0
+
+# --- Dane / obliczenia ---
+pandas==3.0.3
+requests==2.32.3
+tenacity==9.0.0          # ponawianie zapytan do API (retry z backoff)
+
+# --- Google Sheets (reczne wejscie wskaznikow + config) ---
+gspread==6.1.4
+google-auth==2.35.0
+
+# --- BigQuery (hurtownia historii) ---
+# Sciezka REST/Arrow; celowo BEZ google-cloud-bigquery-storage,
+# zeby nie ciagnac grpcio (czesta przyczyna problemow z budowaniem na 3.14).
+google-cloud-bigquery==3.27.0
+db-dtypes==1.3.1
+
+# --- Wykresy (dzialaja w Streamlit i Dash) ---
+plotly==5.24.1
+
+# --- Wariant alternatywny frontendu ---
+dash==2.18.2
+
+# --- Lokalne zmienne srodowiskowe (nieuzywane na Streamlit Cloud) ---
+python-dotenv==1.0.1

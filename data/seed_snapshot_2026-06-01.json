@@ -1,0 +1,46 @@
+{
+  "_meta": {
+    "snapshot_date": "2026-06-01",
+    "app_mode": "demo",
+    "uwaga": "Seed do trybu demo (bez chmury). Wartości rynkowe NIE są zgadywane. Pola null uzupełnij: ręcznie (mvrv_z_score, nupl, days_since_ath, ath_date) lub z API w trybie live (price_usd, ma_200w). F&G i whale_accumulating pochodzą od użytkownika.",
+    "config_source": "external_sheets (default) lub native — bez różnicy dla tego seeda",
+    "expected_active_signals": ["fear_greed"],
+    "expected_composite_count": 1,
+    "composite_note": "Wyliczone Z REGUŁY (F&G < 25 = pasmo Extreme Fear), nie pod fixture: 23 < 25 => F&G aktywny; whale_accumulating=false => nieaktywny; reszta null => nieaktywne/nieznane. Składowe pełne 6 sygnałów. Aktualizuj te pola, gdy zmienisz regułę lub odczyty (test_signals.py / demo nie mogą się rozjeżdżać z configiem)."
+  },
+
+  "indicator_readings": [
+    {
+      "reading_date": "2026-06-01",
+      "price_usd": null,
+      "mvrv_z_score": null,
+      "nupl": null,
+      "ma_200w": null,
+      "whale_accumulating": false,
+      "whale_ratio": 0.90,
+      "fear_greed": 23,
+      "days_since_ath": null,
+      "ath_date": null,
+      "notes": "Snapshot ref. Wieloryby zaczely redukowac -> whale_accumulating=FALSE. F&G ~23. Exchange Whale Ratio 72h MA orientacyjnie >0.85."
+    }
+  ],
+
+  "config_thresholds": [
+    { "indicator": "mvrv_z_score",        "operator": "lt",      "threshold_value": 0,    "threshold_value2": null, "weight": 1.0, "active": true, "description": "Dno: MVRV Z < 0" },
+    { "indicator": "nupl",                "operator": "lt",      "threshold_value": 0,    "threshold_value2": null, "weight": 1.0, "active": true, "description": "Dno: NUPL < 0 (kapitulacja)" },
+    { "indicator": "price_to_200w_ratio", "operator": "lte",     "threshold_value": 1.05, "threshold_value2": null, "weight": 1.0, "active": true, "description": "Dno: cena <= ~105% 200W MA" },
+    { "indicator": "whale_accumulating",  "operator": "is_true", "threshold_value": null, "threshold_value2": null, "weight": 1.0, "active": true, "description": "Dno: reczna flaga TRUE; ref. Exchange Whale Ratio 72h MA < 0.85" },
+    { "indicator": "fear_greed",          "operator": "lt",      "threshold_value": 25,   "threshold_value2": null, "weight": 0.5, "active": true, "description": "Dno: F&G < 25 = pasmo Extreme Fear alternative.me (0-24); niska waga" },
+    { "indicator": "days_since_ath",      "operator": "between", "threshold_value": 300,  "threshold_value2": 400,  "weight": 1.0, "active": true, "description": "Dno: ~10-13 mies. od ATH" }
+  ],
+
+  "dca_tranches": [
+    { "tranche_id": 1, "trigger_price_usd": 70000, "allocation_usd": null, "allocation_pct": null, "min_signals_required": null, "status": "pending", "executed_date": null, "executed_price_usd": null, "note": "PRZYKLAD - uzupelnij kwoty/udzialy" },
+    { "tranche_id": 2, "trigger_price_usd": 67500, "allocation_usd": null, "allocation_pct": null, "min_signals_required": null, "status": "pending", "executed_date": null, "executed_price_usd": null, "note": "PRZYKLAD" },
+    { "tranche_id": 3, "trigger_price_usd": 65000, "allocation_usd": null, "allocation_pct": null, "min_signals_required": null, "status": "pending", "executed_date": null, "executed_price_usd": null, "note": "PRZYKLAD" },
+    { "tranche_id": 4, "trigger_price_usd": 62500, "allocation_usd": null, "allocation_pct": null, "min_signals_required": null, "status": "pending", "executed_date": null, "executed_price_usd": null, "note": "PRZYKLAD" },
+    { "tranche_id": 5, "trigger_price_usd": 60000, "allocation_usd": null, "allocation_pct": null, "min_signals_required": null, "status": "pending", "executed_date": null, "executed_price_usd": null, "note": "PRZYKLAD" },
+    { "tranche_id": 6, "trigger_price_usd": 57500, "allocation_usd": null, "allocation_pct": null, "min_signals_required": null, "status": "pending", "executed_date": null, "executed_price_usd": null, "note": "PRZYKLAD" },
+    { "tranche_id": 7, "trigger_price_usd": 55000, "allocation_usd": null, "allocation_pct": null, "min_signals_required": null, "status": "pending", "executed_date": null, "executed_price_usd": null, "note": "PRZYKLAD - dno docelowe" }
+  ]
+}

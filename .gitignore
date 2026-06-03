@@ -1,0 +1,28 @@
+# ====== SEKRETY — NIGDY do repo (repo jest publiczne!) ======
+.env
+.streamlit/secrets.toml
+secrets/
+*service_account*.json
+*-key.json
+*.pem
+
+# ====== Python ======
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ====== IDE / OS ======
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ====== Lokalny lock (opcjonalnie commituj, jak chcesz pelna reprodukowalnosc) ======
+# requirements.lock.txt
+
+# UWAGA: data/ (seed) oraz pliki *.example SA commitowane — to nie sekrety.

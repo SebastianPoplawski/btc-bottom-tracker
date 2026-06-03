@@ -1,0 +1,8 @@
+tranche_id,trigger_price_usd,allocation_usd,allocation_pct,min_signals_required,status,executed_date,executed_price_usd,note
+1,70000,,,,pending,,,PRZYKLAD - uzupelnij kwoty/udzialy
+2,67500,,,,pending,,,PRZYKLAD
+3,65000,,,,pending,,,PRZYKLAD
+4,62500,,,,pending,,,PRZYKLAD
+5,60000,,,,pending,,,PRZYKLAD
+6,57500,,,,pending,,,PRZYKLAD
+7,55000,,,,pending,,,PRZYKLAD - dno docelowe

@@ -1,0 +1,16 @@
+# Konfiguracja Streamlit — bezpieczna do commitowania (BEZ sekretow).
+# Sekrety ida do .streamlit/secrets.toml (gitignored) — patrz secrets.toml.example.
+
+[theme]
+base = "dark"
+primaryColor = "#F7931A"          # bitcoin orange
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#1A1D24"
+textColor = "#FAFAFA"
+
+[server]
+headless = true
+runOnSave = true
+
+[browser]
+gatherUsageStats = false
