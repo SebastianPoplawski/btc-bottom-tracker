@@ -1,8 +1,8 @@
 # STATUS / Handover — BTC Bottom Tracker
 
-> Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **03 (logika
-> sygnałów + Composite Bottom Score) ZAMKNIĘTE**. Następny krok: **04 — UI Streamlit
-> (karty, gauge, wykresy, moduł DCA)**.
+> Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **04 (UI Streamlit
+> + lekka logika DCA) ZAMKNIĘTE**. Następny krok: **05 — wariant Dash
+> (szkielet do porównania)**.
 > Architektura i instrukcje: README.md + docs/SETUP_GCP.md.
 > Ostatnia aktualizacja: 2026-06-08.
 
@@ -25,9 +25,12 @@
 - [x] **03 — Logika sygnałów + Composite Bottom Score + werdykt** — ZROBIONE:
       `src/logic/composite.py` + `tests/test_signals.py` (**41 testów, wszystkie zielone**).
       Commit: `dba7fcb`. Szczegóły niżej.
-- [ ] **04 — UI Streamlit** — NASTĘPNY KROK. `app.py` + `src/ui/` (karty, gauge, wykresy,
-      moduł DCA). Spina warstwy: config + odczyty → `composite.evaluate` → prezentacja.
-- [ ] 05 — Wariant Dash (szkielet do porównania).
+- [x] **04 — UI Streamlit (jedna strona) + lekka logika DCA** — ZROBIONE:
+      `app.py` (punkt wejścia, tylko UI), `src/config.py` (przełącznik demo/live),
+      `src/ingestion/mock.py` (loader seeda), `src/logic/dca.py` (czysta logika DCA),
+      `src/ui/components.py` + `src/ui/text_pl.py` (gauge, karty, wykresy, panel DCA),
+      `tests/test_dca.py` (**16 testów**). Commit: `0878c3c`. Szczegóły niżej.
+- [ ] **05 — Wariant Dash** — NASTĘPNY KROK (szkielet do porównania ze Streamlitem).
 
 ---
 
@@ -77,6 +80,22 @@ ważony `0.5/1.5` → dokładnie `expected_composite_count=1`.
 
 ---
 
+## Decyzje kroku 04 (rozstrzygnięte — nie zmieniać bez powodu)
+
+1. **Układ = jedna strona (scroll):** nagłówek z werdyktem + gauge → grid kart wskaźników →
+   wykresy → panel DCA. Gauge oparty na liczniku `count_met/count_active`, `weighted_ratio`
+   jako podtekst (zgodnie z decyzją 03: werdykt na liczniku, score jako niuans).
+2. **Świeżość danych** przez `sheets.assess_freshness`; gdy wskaźnik `met=None` → karta
+   „brak danych", composite **się NIE zeruje** (brak danych ≠ sygnał niespełniony).
+3. **Live degraduje się łagodnie:** każde źródło (Sheets / Binance / F&G / BQ) w osobnym `try` —
+   awaria jednego nie wywala całego UI. **Tryb demo nie importuje `google`/`gspread`**
+   (czysty seed, zero zależności sieciowych/chmurowych).
+4. **DCA — cena ręczna w UI** (`st.number_input`), bo seed ma `price_usd=null` — nie zgadujemy
+   rynku. Logika `dca.py` jest czysta i opisowa (`price_reached` / `signals_ok` /
+   `conditions_met`), bez „kup/sprzedaj".
+
+---
+
 ## Decyzje zablokowane (z poprzednich kroków)
 
 - **Hurtownia = Google BigQuery** (NIE Snowflake). Dataset `btc_tracker`, EU.
@@ -99,24 +118,30 @@ ważony `0.5/1.5` → dokładnie `expected_composite_count=1`.
 ## Repo / workflow
 
 - **Repo GitHub: `github.com/SebastianPoplawski/btc-bottom-tracker` — PRYWATNE.** Źródło prawdy.
-  Commity: `a6732e3` (00–02), `6625fb4` (02-API), `dba7fcb` (03).
+  Commity: `a6732e3` (00–02), `6625fb4` (02-API), `dba7fcb` (03), `11f1e68` (docs/hash 03),
+  `0878c3c` (04).
 - **Lokalnie:** `C:\Users\sebastian.poplawski\Projects\BTC Bottom Tracker`, venv `.venv`,
   Windows + PowerShell. Push przez **Claude Code** (lokalny git + `gh`).
 - **git config:** `user.name="Sebastian Poplawski"`, `user.email="poplawski.sebastian94@gmail.com"`.
-- **Struktura repo (po 03):**
+- **Struktura repo (po 04):**
   ```
-  app.py                              (krok 04 — jeszcze nie istnieje)
+  app.py                              (04 — punkt wejścia Streamlit, tylko UI)
+  src/config.py                       (04 — przełącznik demo/live)
   src/warehouse/bigquery_client.py
   src/warehouse/ddl.sql
   src/ingestion/sheets.py
   src/ingestion/price_binance.py
   src/ingestion/fear_greed_api.py
   src/ingestion/run_ingest.py
+  src/ingestion/mock.py               (04 — loader seeda dla trybu demo)
   src/logic/composite.py              (03)
-  src/ui/                             (krok 04 — jeszcze nie istnieje)
+  src/logic/dca.py                    (04 — czysta logika DCA)
+  src/ui/components.py                (04 — gauge, karty, wykresy, panel DCA)
+  src/ui/text_pl.py                   (04 — polskie napisy UI)
   data/  seed + 2 CSV
   docs/  SETUP_GCP, SETUP_GITHUB, SHEETS_LAYOUT, STATUS
   tests/test_signals.py               (03)
+  tests/test_dca.py                   (04 — 16 testów)
   .streamlit/  config.toml, secrets.toml.example
   ```
 - **Konektor GitHub w Claude:** dociąganie plików repo przez „+". Claude nie przegląda repo sam;
@@ -124,18 +149,15 @@ ważony `0.5/1.5` → dokładnie `expected_composite_count=1`.
 
 ---
 
-## DO ROZSTRZYGNIĘCIA na start kroku 04 (otwarte)
+## DO ROZSTRZYGNIĘCIA na start kroku 05 — Dash (otwarte)
 
-1. **Układ UI:** jedna strona (scroll: nagłówek z verdict+score → grid 6 kart → wykresy → DCA)
-   czy zakładki (Przegląd / Wykresy / DCA)? Rekomendacja Claude: **jedna strona** na MVP.
-2. **Gauge composite:** licznik X/6 jako duży wskaźnik + mały podtekst z `weighted_ratio`,
-   czy odwrotnie? (zgodnie z decyzją 03: werdykt na liczniku, score jako niuans).
-3. **Świeżość danych w UI:** użyć `sheets.assess_freshness` → plakietka „dane z dnia X
-   (sprzed N dni)"; auto-wskaźniki (price/MA/F&G) i tak dociągają świeże. Potwierdzić zachowanie
-   gdy część odczytów `None` (karta „brak danych", nie crash).
-4. **Moduł DCA w UI:** czy w 04 budujemy też logikę DCA (`src/logic/dca.py` — jeszcze NIE
-   istnieje), czy najpierw sam widok na surowych `dca_tranches`? Rekomendacja: lekka logika
-   DCA + widok w 04.
+1. **Zakres wariantu Dash:** pełna parzystość ze Streamlitem czy tylko szkielet pokazowy
+   (gauge + karty + werdykt, bez panelu DCA)? Rekomendacja: **szkielet pokazowy** na start.
+2. **Współdzielenie warstw:** Dash konsumuje te same `config` + `composite.evaluate` /
+   `dca.compute_dca_state` (logika jest czysta, zero zależności od Streamlita) — potwierdzić,
+   że nic z `src/ui/` (Streamlit-specyficzne) nie przecieka do wariantu Dash.
+3. **Hosting Dash:** lokalnie do porównania czy też publikacja? (Streamlit Cloud nie uruchomi
+   Dash — inny runtime). Domyślnie: **lokalnie**, bez deployu.
 
 ---
 
@@ -158,14 +180,11 @@ udostępniony SA jako writer.
 
 ---
 
-## Dług techniczny (do sprzątnięcia — NIE blokuje 04)
+## Dług techniczny (do sprzątnięcia — NIE blokuje 05)
 
-- **`ddl.sql`:** komentarz statusu DCA mówi `pending | filled | skipped`, a `sheets.py`
-  waliduje `{pending, executed, skipped}` (kolumny to `executed_*`). Ujednolicić komentarz
-  na **`executed`**. (Sama zmiana komentarza, bez zmiany danych.)
-- **README.md + master prompt:** w kilku miejscach jeszcze „F&G < 20" → zaktualizować na
-  **„< 25"** (zgodnie z configiem i `composite.py`).
-- Oba do zrobienia jednym osobnym commitem (np. przy DCA/dokumentacji), żeby nie mieszać do 03.
+- **Master prompt (poza repo): „F&G < 20" → „< 25".** README.md i `ddl.sql` już poprawione
+  (commit `11f1e68`), ale master prompt Projektu wciąż mówi „< 20" → zaktualizować ręcznie
+  na **„< 25"** (zgodnie z configiem i `composite.py`). Niezrobione.
 
 ## Do zrobienia ręcznie zanim ruszy LIVE (po stronie użytkownika)
 
