@@ -1,7 +1,8 @@
 # STATUS / Handover — BTC Bottom Tracker
 
-> Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **02 + 02-API
-> (ingestion) ZAMKNIĘTE**. Następny krok: **03 — logika sygnałów + Composite Bottom Score**.
+> Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **03 (logika
+> sygnałów + Composite Bottom Score) ZAMKNIĘTE**. Następny krok: **04 — UI Streamlit
+> (karty, gauge, wykresy, moduł DCA)**.
 > Architektura i instrukcje: README.md + docs/SETUP_GCP.md.
 > Ostatnia aktualizacja: 2026-06-08.
 
@@ -11,80 +12,132 @@
 
 - [x] **00 — Architektura i setup** — ZROBIONE (fundamenty + pełny setup GCP na żywo).
 - [x] **01 — Schemat danych** — ZROBIONE: DDL 3 tabel (`indicator_readings` native,
-      `config_thresholds` + `dca_tranches` external/Sheets), moduł dostępu
-      `src/warehouse/bigquery_client.py` (auth SA, ensure_dataset, upsert MERGE, read_history,
-      read_config/dca), seed `data/seed_snapshot_2026-06-01.json` + CSV-y layoutu zakładek.
+      `config_thresholds` + `dca_tranches` external/Sheets), moduł `src/warehouse/bigquery_client.py`
+      (auth SA, ensure_dataset, upsert MERGE, read_history, read_config/dca), seed
+      `data/seed_snapshot_2026-06-01.json` + CSV-y layoutu zakładek.
 - [x] **02 — Ingestion (Sheets)** — ZROBIONE: `src/ingestion/sheets.py` (gspread; odczyt 3
-      zakładek do DataFrame, walidacja, świeżość `assess_freshness`, mostek `build_reading_values`
-      → `upsert_reading`). Layout arkusza: `docs/SHEETS_LAYOUT.md`.
+      zakładek → DataFrame, walidacja, świeżość `assess_freshness`, mostek `build_reading_values`
+      → `upsert_reading`). Layout: `docs/SHEETS_LAYOUT.md`.
 - [x] **02-API — Ingestion (auto-fetch)** — ZROBIONE: `src/ingestion/price_binance.py`
       (cena spot Binance + 200W MA z tygodniowych zamknięć; fallback CoinGecko dla ceny),
       `src/ingestion/fear_greed_api.py` (alternative.me), `src/ingestion/run_ingest.py`
-      (orkiestrator: AUTO + ręczne z arkusza → `upsert_reading`). Dry-run zweryfikowany na żywo
-      (price/ma_200w/fear_greed pobrane OK). retry (`tenacity`), cache (`st.cache_data` w
-      Streamlit, no-op poza).
-- [ ] **03 — Logika sygnałów + Composite Bottom Score + werdykt** — NASTĘPNY KROK.
-      `src/logic/composite.py` + `tests/test_signals.py`. Czyta `config_thresholds`
-      (operatory `lt/lte/gt/gte/eq/is_true/between`), liczy `price_to_200w_ratio =
-      price_usd/ma_200w` (computed, nie ze schematu), ocenia każdy wskaźnik → composite + werdykt PL.
-- [ ] 04 — UI Streamlit (karty, gauge, wykresy, moduł DCA) — `app.py`, `src/ui/`.
+      (orkiestrator AUTO + ręczne z arkusza → `upsert_reading`). Dry-run zweryfikowany na żywo.
+- [x] **03 — Logika sygnałów + Composite Bottom Score + werdykt** — ZROBIONE:
+      `src/logic/composite.py` + `tests/test_signals.py` (**41 testów, wszystkie zielone**).
+      Commit: `dba7fcb`. Szczegóły niżej.
+- [ ] **04 — UI Streamlit** — NASTĘPNY KROK. `app.py` + `src/ui/` (karty, gauge, wykresy,
+      moduł DCA). Spina warstwy: config + odczyty → `composite.evaluate` → prezentacja.
 - [ ] 05 — Wariant Dash (szkielet do porównania).
 
-## Repo / workflow (NOWE)
+---
 
-- **Repo GitHub: `github.com/SebastianPoplawski/btc-bottom-tracker` — PRYWATNE.** To jest
-  źródło prawdy. Commity: `a6732e3` (00-02 fundamenty+schemat+reorg), `6625fb4` (02-API + fix pandas).
-- **Lokalnie:** `C:\Users\sebastian.poplawski\Projects\BTC Bottom Tracker`, venv `.venv`,
-  Windows + PowerShell. Push przez **Claude Code** (lokalny git + `gh`).
-- **git config (ustawione):** `user.name="Sebastian Poplawski"`,
-  `user.email="poplawski.sebastian94@gmail.com"`. (Commity `a6732e3`/`6625fb4` mają jeszcze
-  stary służbowy e-mail — zostawione świadomie, nie przepisujemy historii.)
-- **Struktura po reorganizacji:**
-  ```
-  src/warehouse/bigquery_client.py   (był bigquery_warehouse.py)
-  src/warehouse/ddl.sql              (był btc_bottom_tracker_schema.sql)
-  src/ingestion/sheets.py            (był sheets_ingest.py)
-  src/ingestion/price_binance.py     (02-API)
-  src/ingestion/fear_greed_api.py    (02-API)
-  src/ingestion/run_ingest.py        (02-API, orkiestrator)
-  data/  seed + 2 CSV
-  docs/  SETUP_GCP, SETUP_GITHUB, SHEETS_LAYOUT, STATUS
-  .streamlit/  config.toml, secrets.toml.example
-  ```
-- **Drive:** już TYLKO żywy arkusz „BTC Bottom Tracker — dane" (warstwa danych). Kopie kodu
-  na Drive są zbędne — źródłem prawdy jest repo.
-- **Konektor GitHub w Claude:** połączony na koncie; w czacie działa „attach files via +"
-  (dociąganie plików z repo do rozmowy). NIE wystawia narzędzi agentowych w Projekcie — Claude
-  nie przegląda repo sam; pliki dodaje się przez **+** albo wkleja. Push robi Claude Code lokalnie.
+## Krok 03 — co dokładnie powstało (źródło prawdy = kod w repo)
 
-## Decyzje zablokowane (nie zmieniać bez powodu)
+**`src/logic/composite.py`** — CZYSTA logika, zero I/O (nie importuje BigQuery/Streamlita/sieci).
+- `evaluate(config, reading, graded_fng=False) -> CompositeResult` — główne wejście.
+  - `config`: DataFrame **lub** list[dict] (kolumny: indicator, operator, threshold_value,
+    threshold_value2, weight, active, description). Akceptuje wynik `read_config_thresholds()`
+    (BQ) i `sheets.read_config`.
+  - `reading`: Mapping / pandas.Series / dict / **1-wierszowy DataFrame**. Pasuje pod
+    `sheets.latest_reading(...)` i `build_reading_values(...)`.
+- `derive_values(reading)` — wartości testowalne: bezpośrednie z kolumn `indicator_readings`
+  + **computed**. `price_to_200w_ratio = price_usd / ma_200w` liczone przez rejestr `COMPUTED`
+  (dodanie nowego computed = jedna linia, bez ruszania reszty).
+- `apply_operator(value, op, t1, t2)` — operatory `lt/lte/gt/gte/eq/is_true/between`
+  (+ `is_false` defensywnie). Bool celowo **nie** przechodzi przez operatory liczbowe
+  (whale nie da się przypadkiem porównać `>`). Brak danych/progu/nieznany operator → `met=None`.
+- `graded_fear_greed(value)` — **hak** na wkład stopniowy F&G (pełny <10, liniowo 10–25,
+  zero ≥25). Domyślnie NIEUŻYWANY; włącza go `evaluate(..., graded_fng=True)`.
+- `build_verdict(...)` — opisowy werdykt PL (bez „kup/sprzedaj"), z liczbą brakujących danych.
+- `CompositeResult` (pola): `count_met`, `count_active`, `count_evaluable`,
+  `weighted_met`, `weighted_total`, `weighted_ratio`, `indicators[IndicatorResult]`,
+  `verdict`, `warnings`, `as_of`, `disclaimer` (= stała `DISCLAIMER`).
+- `results_to_dataframe(result)` — tabela wskaźników pod UI (gotowe pod krok 04).
+- `LABELS` — czytelne PL etykiety wskaźników do UI.
 
-- **Hurtownia = Google BigQuery** (NIE Snowflake). Dataset `btc_tracker`, EU (istnieje).
-- **Architektura tabel:** `indicator_readings` = NATIVE (upsert MERGE po dacie);
-  `config_thresholds` + `dca_tranches` = EXTERNAL na Google Sheets. Default env:
-  `CONFIG_TABLE=config_thresholds_ext`, `DCA_TABLE=dca_tranches_ext`.
+**`tests/test_signals.py`** — 41 testów (operatory + granice, computed ratio, brak danych,
+seed 2026-06-01, ważony score, granica F&G <25, hak graded, pełne dno 6/6, aktywność/wagi,
+werdykt, pandas Series/DataFrame, locale). Uruchom: `python -m pytest tests/ -q`.
+
+**Walidacja na seedzie 2026-06-01:** `count_met=1`, `count_evaluable=2` (F&G met + whale=False),
+ważony `0.5/1.5` → dokładnie `expected_composite_count=1`.
+
+---
+
+## Decyzje kroku 03 (rozstrzygnięte — nie zmieniać bez powodu)
+
+1. **Wkład do composite = binarnie wg configu + hak na stopniowy F&G (domyślnie OFF).**
+   Licznik „ile z 6" jest CAŁKOWITY (spełniony = +1, niezależnie od wagi) → spójne z seedem
+   `expected_composite_count=1`. Wagi wchodzą TYLKO do `weighted_*`. Tryb graded modyfikuje
+   wyłącznie wkład ważony F&G, licznik zostaje binarny (test to pilnuje).
+2. **„Okno zakupu" = OBA:** werdykt opisowy na liczniku `count_met`, ważony `weighted_ratio`
+   jako niuans obok.
+3. **`price_to_200w_ratio` = COMPUTED** (`price_usd/ma_200w`), nie kolumna w `indicator_readings`
+   (zgodnie z DDL — tabela trzyma surowe odczyty, sygnały liczy Python).
+
+---
+
+## Decyzje zablokowane (z poprzednich kroków)
+
+- **Hurtownia = Google BigQuery** (NIE Snowflake). Dataset `btc_tracker`, EU.
+- **Tabele:** `indicator_readings` = NATIVE (upsert MERGE po dacie); `config_thresholds`
+  + `dca_tranches` = EXTERNAL na Google Sheets. Env: `CONFIG_TABLE=config_thresholds_ext`,
+  `DCA_TABLE=dca_tranches_ext`.
 - **Scope SA:** `auth/bigquery` + `auth/drive` (full, nie readonly).
 - **Whale:** sygnał dna = ręczna flaga `whale_accumulating` (operator `is_true`, NADRZĘDNA).
   `whale_ratio` tylko referencyjnie (orient. < 0.85), wpis ręczny przez Sheets.
 - **Fear & Greed próg = `< 25`** (pasmo Extreme Fear alternative.me 0–24), **waga 0.5**.
-  - DOC do poprawy: README i master prompt mówią jeszcze „< 20" → zaktualizować na „< 25".
-  - TODO krok 03: rozważyć zdjęcie binarności F&G (wkład stopniowy: 0 dla >25, częściowy 10–24,
-    pełny <10). Composite ważony (kolumna `weight`).
-- **Cena BTC / 200W MA:** Binance public API (bez klucza); CoinGecko fallback dla ceny spot
-  (dla 200W MA brak darmowego fallbacku — wtedy ma_200w=None + ostrzeżenie).
-- **Zależności:** `pandas` ODPIĘTY (`==3.0.3` → `pandas`), bo Streamlit 1.55.0 wymaga
-  `pandas<3`. pip dobrał `pandas-2.3.3` (cp314). `requirements.lock.txt` zacommitowany.
+- **Cena BTC / 200W MA:** Binance public API (bez klucza); CoinGecko fallback tylko dla ceny
+  spot (dla 200W MA brak darmowego fallbacku — wtedy ma_200w=None + ostrzeżenie).
+- **Zależności:** `pandas` ODPIĘTY (Streamlit 1.55.0 wymaga `pandas<3`; pip dobiera 2.3.x cp314).
+  `requirements.lock.txt` zacommitowany.
 - **Python 3.14**, Windows. Hosting docelowy = Streamlit Community Cloud z repo GitHub.
-- **Tryby:** `APP_MODE=demo` (mock+seed) / `live` (BigQuery+Sheets); `BTT_DEMO=1` / dry-run.
+- **Tryby:** `APP_MODE=demo` (mock+seed) / `live` (BigQuery+Sheets); `BTT_DRY_RUN=1` dla ingestu.
 
-## DO ROZSTRZYGNIĘCIA na start kroku 03 (otwarte)
+---
 
-1. **Wkład wskaźników do composite:** binarnie wg config (spełniony = pełna waga) vs wkład
-    stopniowy dla F&G. Rekomendacja Claude: **binarnie teraz + hak na stopniowy później**
-    (spójne z seedem `expected_composite_count=1` i `test_signals.py`).
-2. **„Okno zakupu":** licznik (ile z 6) vs ważony score vs oba. Rekomendacja Claude: **oba**
-    (werdykt na liczniku, score jako niuans).
-   > Użytkownik jeszcze nie potwierdził — dopytać na początku 03.
+## Repo / workflow
+
+- **Repo GitHub: `github.com/SebastianPoplawski/btc-bottom-tracker` — PRYWATNE.** Źródło prawdy.
+  Commity: `a6732e3` (00–02), `6625fb4` (02-API), `dba7fcb` (03).
+- **Lokalnie:** `C:\Users\sebastian.poplawski\Projects\BTC Bottom Tracker`, venv `.venv`,
+  Windows + PowerShell. Push przez **Claude Code** (lokalny git + `gh`).
+- **git config:** `user.name="Sebastian Poplawski"`, `user.email="poplawski.sebastian94@gmail.com"`.
+- **Struktura repo (po 03):**
+  ```
+  app.py                              (krok 04 — jeszcze nie istnieje)
+  src/warehouse/bigquery_client.py
+  src/warehouse/ddl.sql
+  src/ingestion/sheets.py
+  src/ingestion/price_binance.py
+  src/ingestion/fear_greed_api.py
+  src/ingestion/run_ingest.py
+  src/logic/composite.py              (03)
+  src/ui/                             (krok 04 — jeszcze nie istnieje)
+  data/  seed + 2 CSV
+  docs/  SETUP_GCP, SETUP_GITHUB, SHEETS_LAYOUT, STATUS
+  tests/test_signals.py               (03)
+  .streamlit/  config.toml, secrets.toml.example
+  ```
+- **Konektor GitHub w Claude:** dociąganie plików repo przez „+". Claude nie przegląda repo sam;
+  push robi Claude Code lokalnie.
+
+---
+
+## DO ROZSTRZYGNIĘCIA na start kroku 04 (otwarte)
+
+1. **Układ UI:** jedna strona (scroll: nagłówek z verdict+score → grid 6 kart → wykresy → DCA)
+   czy zakładki (Przegląd / Wykresy / DCA)? Rekomendacja Claude: **jedna strona** na MVP.
+2. **Gauge composite:** licznik X/6 jako duży wskaźnik + mały podtekst z `weighted_ratio`,
+   czy odwrotnie? (zgodnie z decyzją 03: werdykt na liczniku, score jako niuans).
+3. **Świeżość danych w UI:** użyć `sheets.assess_freshness` → plakietka „dane z dnia X
+   (sprzed N dni)"; auto-wskaźniki (price/MA/F&G) i tak dociągają świeże. Potwierdzić zachowanie
+   gdy część odczytów `None` (karta „brak danych", nie crash).
+4. **Moduł DCA w UI:** czy w 04 budujemy też logikę DCA (`src/logic/dca.py` — jeszcze NIE
+   istnieje), czy najpierw sam widok na surowych `dca_tranches`? Rekomendacja: lekka logika
+   DCA + widok w 04.
+
+---
 
 ## Konfiguracja na żywo (do secrets.toml — KLUCZA JSON tu NIE MA)
 
@@ -103,6 +156,17 @@ Stan GCP: projekt + billing (alert $1); API (BigQuery/Sheets/Drive) on; dataset 
 w EU; SA z rolami (Editor/Viewer — do zwężenia do `BigQuery Job User` + `Data Editor`); arkusz
 udostępniony SA jako writer.
 
+---
+
+## Dług techniczny (do sprzątnięcia — NIE blokuje 04)
+
+- **`ddl.sql`:** komentarz statusu DCA mówi `pending | filled | skipped`, a `sheets.py`
+  waliduje `{pending, executed, skipped}` (kolumny to `executed_*`). Ujednolicić komentarz
+  na **`executed`**. (Sama zmiana komentarza, bez zmiany danych.)
+- **README.md + master prompt:** w kilku miejscach jeszcze „F&G < 20" → zaktualizować na
+  **„< 25"** (zgodnie z configiem i `composite.py`).
+- Oba do zrobienia jednym osobnym commitem (np. przy DCA/dokumentacji), żeby nie mieszać do 03.
+
 ## Do zrobienia ręcznie zanim ruszy LIVE (po stronie użytkownika)
 
 1. Uruchomić DDL z `src/warehouse/ddl.sql` (tabele native + external).
@@ -111,7 +175,9 @@ udostępniony SA jako writer.
    Nagłówki `indicator_readings` wg `docs/SHEETS_LAYOUT.md`.
 3. Uzupełnić wartości ręczne (`mvrv_z_score`, `nupl`, `whale_accumulating`, `ath_date`).
 4. Sekrety: skopiować `.streamlit/secrets.toml.example` → `secrets.toml`, wkleić pola klucza JSON,
-   `APP_MODE="live"`. Wtedy `run_ingest.py` dopisze AUTO + ręczne do `indicator_readings`.
+   `APP_MODE="live"`.
+
+---
 
 ## Pułapki napotkane (żeby nie powtarzać)
 
@@ -120,29 +186,31 @@ udostępniony SA jako writer.
 - External nad Sheets bez scope `auth/drive` => 403.
 - **Konflikt zależności:** `pandas==3.0.3` × `streamlit<3` → ResolutionImpossible. Fix: odpiąć pandas.
 - **PowerShell ≠ cmd:** `set VAR=1` nie działa; używać `$env:VAR = "1"`. venv: `.venv\Scripts\activate`.
-- **Niespójność słownika statusów DCA:** `ddl.sql` (komentarz) mówi `pending|filled|skipped`,
-  a `sheets.py` waliduje `{pending, executed, skipped}`. Kolumny to `executed_*` → ujednolicić na
-  **`executed`** (poprawić komentarz w ddl.sql). DO ZROBIENIA przy 03/DCA.
 - **02-API live (2026-06-08):** dry-run zwrócił price_usd≈63941, ma_200w≈61827, **fear_greed=8**
   (głęboki Extreme Fear; snapshot z 1.06 miał ~23 — sentyment mocno spadł). F&G<25 dalej aktywny.
-- `run_ingest.py` import ma fallback na `sys.path` (działa jako skrypt i jako pakiet). Gdy 04
-  zacznie importować jako pakiet — rozważyć puste `__init__.py`.
+- **03 — schemat indicatorów:** w configu klucz to `mvrv_z_score`/`nupl`/`fear_greed`/
+  `days_since_ath`/`whale_accumulating` (1:1 z kolumnami readings) ORAZ `price_to_200w_ratio`
+  (computed, NIE kolumna). `composite.derive_values` to obsługuje — przy dodaniu wskaźnika
+  pamiętać o tej różnicy.
+- **03 — bool vs liczba:** `whale_accumulating` jest bool; operatory liczbowe celowo go
+  odrzucają (`_to_number` zwraca None dla bool), więc działa tylko `is_true`.
 
 ## Czego pilnować
 
 - Klucz JSON: NIGDY do repo/na czat/na publiczne foldery. Tylko lokalnie + panel Streamlit Cloud.
 - Repo PRYWATNE — `.gitignore` i tak blokuje sekrety; sprawdzać listę przed pushem.
 - Zapytania BQ: `SELECT` tylko potrzebnych kolumn + filtr po dacie (free tier 1 TB/mies.).
-- Fixture vs config: `seed_snapshot_2026-06-01.json` ma `expected_composite_count=1` Z REGUŁY
-  (F&G<25). Przy zmianie progu/odczytu zaktualizować — demo i `test_signals.py` nie mogą się
-  rozjeżdżać z configiem.
-- W UI zawsze disclaimer: „narzędzie analityczne, nie porada inwestycyjna".
+- **Fixture vs config:** `seed_snapshot_2026-06-01.json` ma `expected_composite_count=1` Z REGUŁY
+  (F&G<25). Przy zmianie progu/odczytu zaktualizować seed — demo, `test_signals.py` i
+  `composite.py` nie mogą się rozjeżdżać.
+- W UI zawsze disclaimer: „narzędzie analityczne, nie porada inwestycyjna" (stała
+  `composite.DISCLAIMER` + pole `CompositeResult.disclaimer`).
 - **Metodologia:** framework = strukturalny obiektyw, NIE zwalidowany predyktor (~3–4 dna, 6
-  parametrów → fit gwarantowany; MVRV Z i NUPL redundantne). Werdykt opisowy, bez „kup/sprzedaj teraz".
+  parametrów → fit gwarantowany; MVRV Z i NUPL redundantne). Werdykt opisowy, bez „kup/sprzedaj".
 
 ## Pomocne: co Claude może zrobić sam w Projekcie
 
-- **Attach z GitHub przez +**: dociągnąć aktualne pliki repo do rozmowy (źródło prawdy).
-- **Google Drive**: czytać/kopiować/tworzyć pliki (już głównie pod arkusz).
-- Czego NIE: konsola GCP (IAM/API/dataset/klucze), push na GitHub (to robi Claude Code lokalnie),
+- **Attach z GitHub przez „+"**: dociągnąć aktualne pliki repo do rozmowy (źródło prawdy).
+- **Google Drive**: czytać/kopiować/tworzyć pliki (głównie pod arkusz).
+- Czego NIE: konsola GCP (IAM/API/dataset/klucze), push na GitHub (robi Claude Code lokalnie),
   pisanie po komórkach istniejącego arkusza (layout ręcznie albo przez gspread).

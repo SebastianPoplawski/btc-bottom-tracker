@@ -46,7 +46,7 @@ btc-bottom-tracker/
 │   │   ├── nupl.py             #   NUPL (dno: < 0)
 │   │   ├── ma_200w.py          #   cena vs 200-tyg. srednia
 │   │   ├── whale_ratio.py      #   akumulacja wielorybow
-│   │   ├── fear_greed.py       #   Fear & Greed (dno: < 20)
+│   │   ├── fear_greed.py       #   Fear & Greed (dno: < 25)
 │   │   └── time_since_ath.py   #   miesiace od ATH (cel 10–12)
 │   ├── ingestion/              # ZRODLA DANYCH (oddzielone od logiki sygnalow)
 │   │   ├── price_binance.py    #   tygodniowe zamkniecia BTC -> 200W MA

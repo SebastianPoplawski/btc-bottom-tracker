@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS `btc-bottom-tracker-498120.btc_tracker.dca_tranches` 
   allocation_usd       NUMERIC OPTIONS(description="Kwota do wdrożenia, USD"),
   allocation_pct       NUMERIC OPTIONS(description="Udział transzy w budżecie (%)"),
   min_signals_required INT64   OPTIONS(description="Min. liczba sygnałów dna by aktywować (opcjonalne)"),
-  status               STRING  OPTIONS(description="pending | filled | skipped"),
+  status               STRING  OPTIONS(description="pending | executed | skipped"),
   executed_date        DATE    OPTIONS(description="Data realizacji"),
   executed_price_usd   NUMERIC OPTIONS(description="Faktyczna cena realizacji"),
   note                 STRING
