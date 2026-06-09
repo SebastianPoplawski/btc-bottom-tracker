@@ -209,9 +209,9 @@ udostępniony SA jako writer.
   którego nie było w `text_pl.py` → `AttributeError` przy renderze DCA w Streamlicie. Dodano
   `STATUS_PL` do `text_pl.py`. Commit: `914d7f0`. Wariant Dash używał `dca.STATUS_PL` (odporny).
   Potwierdzony na żywo na deployu — panel DCA renderuje się poprawnie.
-- **Master prompt (poza repo): „F&G < 20" → „< 25".** README.md i `ddl.sql` już poprawione
-  (commit `11f1e68`), ale master prompt Projektu wciąż mówi „< 20" → zaktualizować ręcznie
-  na **„< 25"** (zgodnie z configiem i `composite.py`). Niezrobione.
+- **[ZROBIONE] Master prompt: „F&G < 25".** README.md, `ddl.sql` (commit `11f1e68`) oraz
+  master prompt Projektu (instrukcje w ustawieniach Claude) — wszystkie spójne z configiem
+  i `composite.py`. Dług zamknięty.
 
 ## Do zrobienia ręcznie zanim ruszy LIVE (po stronie użytkownika)
 
