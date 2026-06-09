@@ -161,6 +161,12 @@ def ensure_tab(book: "gspread.Spreadsheet", title: str,
 
 
 def main() -> None:
+    # Windows konsola domyslnie cp1252 — wymus UTF-8, by polskie znaki w printach
+    # nie wywalaly skryptu. try/except: reconfigure nie istnieje w starszych srodowiskach.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
     print(f"Arkusz: {SHEET_ID}")
     print("Laczę przez service account...")
     client = get_client()
