@@ -27,7 +27,11 @@ logger = logging.getLogger(__name__)
 
 BINANCE_BASE = "https://api.binance.com"
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
+KRAKEN_BASE = "https://api.kraken.com"
 SYMBOL = "BTCUSDT"
+KRAKEN_PAIR = "XBTUSD"                # Kraken: para BTC/USD (klucz w result to zwykle XXBTZUSD)
+KRAKEN_INTERVAL = 10080              # minut = 1 tydzien (Kraken OHLC interval)
+WEEK_SECONDS = 604800               # 7 dni w sekundach (do odrzucenia biezacego tygodnia)
 MA_WINDOW = 200
 WEEKLY_LIMIT = MA_WINDOW + 12        # zapas na odrzucenie biezacego (niezamknietego) tygodnia
 HTTP_TIMEOUT = 15
@@ -77,6 +81,33 @@ def _parse_klines(raw: list, now_ms: Optional[int] = None) -> list[tuple[date, f
     return out
 
 
+def _parse_kraken_ohlc(payload: dict, now_ms: Optional[int] = None) -> list[tuple[date, float]]:
+    """Surowa odpowiedz Kraken OHLC -> [(data_tygodnia, close)], posortowane rosnaco.
+
+    Kraken zwraca {"error":[...], "result": {"<PARA>": [[time, o, h, l, c, vwap, vol, count], ...],
+    "last": <id>}}. Klucz pary to jedyny klucz w result rozny od "last" (zwykle XXBTZUSD).
+    `time` to start tygodnia (unix sekundy); odrzucamy biezacy, niezamkniety tydzien
+    (time + WEEK_SECONDS w przyszlosci) — analogicznie do _parse_klines z closeTime."""
+    if now_ms is None:
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    result = payload.get("result", {})
+    pair_key = next((k for k in result if k != "last"), None)
+    if pair_key is None:
+        return []
+    out: list[tuple[date, float]] = []
+    for row in result[pair_key]:
+        open_time_s = int(row[0])
+        close_time_ms = (open_time_s + WEEK_SECONDS) * 1000
+        if close_time_ms > now_ms:
+            continue  # tydzien jeszcze trwa -> pomijamy do liczenia MA
+        out.append((
+            datetime.fromtimestamp(open_time_s, tz=timezone.utc).date(),
+            float(row[4]),
+        ))
+    out.sort(key=lambda t: t[0])
+    return out
+
+
 def compute_200w_ma(closes: list[float], window: int = MA_WINDOW) -> Optional[float]:
     """Srednia z ostatnich `window` zamkniec tygodniowych. None gdy za malo danych."""
     if len(closes) < window:
@@ -86,10 +117,37 @@ def compute_200w_ma(closes: list[float], window: int = MA_WINDOW) -> Optional[fl
 
 
 @_maybe_cache(ttl_seconds=3600)
-def fetch_weekly_closes(symbol: str = SYMBOL, limit: int = WEEKLY_LIMIT) -> list[tuple[date, float]]:
+def fetch_weekly_closes_binance(symbol: str = SYMBOL, limit: int = WEEKLY_LIMIT) -> list[tuple[date, float]]:
     raw = _get_json(f"{BINANCE_BASE}/api/v3/klines",
                     {"symbol": symbol, "interval": "1w", "limit": limit})
     return _parse_klines(raw)
+
+
+@_maybe_cache(ttl_seconds=3600)
+def fetch_weekly_closes_kraken(pair: str = KRAKEN_PAIR) -> list[tuple[date, float]]:
+    payload = _get_json(f"{KRAKEN_BASE}/0/public/OHLC",
+                        {"pair": pair, "interval": KRAKEN_INTERVAL})
+    err = payload.get("error") or []
+    if err:  # Kraken sygnalizuje bledy w polu "error" przy HTTP 200
+        raise requests.RequestException(f"Kraken API error: {err}")
+    return _parse_kraken_ohlc(payload)
+
+
+def fetch_weekly_closes() -> tuple[list[tuple[date, float]], list[str]]:
+    """Swiece tygodniowe: Binance jako pierwsze zrodlo (lokalnie/EU), Kraken jako fallback
+    (Binance geoblokuje US -> 451 na Streamlit Cloud). Zwraca (closes, ostrzezenia) —
+    spojnie z fetch_spot_price; nie rzuca na zewnatrz."""
+    warnings: list[str] = []
+    try:
+        return fetch_weekly_closes_binance(), warnings
+    except Exception as exc:
+        logger.warning("Binance klines niedostepne (%s); probuje Kraken.", exc)
+        warnings.append(f"Binance klines niedostepne ({exc}); fallback na Kraken (US/chmura).")
+    try:
+        return fetch_weekly_closes_kraken(), warnings
+    except Exception as exc:
+        warnings.append(f"Kraken klines niedostepne ({exc}); ma_200w=None (mozna wpisac recznie).")
+        return [], warnings
 
 
 # --- cena spot ------------------------------------------------------------ #
@@ -139,16 +197,12 @@ def get_price_and_ma() -> PriceData:
     price, w = fetch_spot_price()
     warnings += w
 
-    ma: Optional[float] = None
-    weeks = 0
-    try:
-        closes = fetch_weekly_closes()
-        weeks = len(closes)
-        ma = compute_200w_ma([c for _, c in closes])
-        if ma is None:
-            warnings.append(f"Za malo zamkniec tygodniowych do 200W MA ({weeks} < {MA_WINDOW}).")
-    except Exception as exc:
-        warnings.append(f"Binance klines niedostepne ({exc}); ma_200w=None (mozna wpisac recznie).")
+    closes, w = fetch_weekly_closes()
+    warnings += w
+    weeks = len(closes)
+    ma = compute_200w_ma([c for _, c in closes])
+    if ma is None and weeks > 0:
+        warnings.append(f"Za malo zamkniec tygodniowych do 200W MA ({weeks} < {MA_WINDOW}).")
 
     return PriceData(price_usd=price, ma_200w=ma, weeks_available=weeks, warnings=warnings)
 
