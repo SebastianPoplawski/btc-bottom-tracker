@@ -30,13 +30,14 @@ Kolumny = pola upsertu z `bigquery_warehouse.py` (`_READING_FIELDS`) + `reading_
 | `whale_accumulating`| BOOL     | **ręczne**        | flaga dna `TRUE`/`FALSE` (nadrzędny sygnał wielorybów) |
 | `whale_ratio`       | NUMERIC  | **ręczne (ref.)** | Exchange Whale Ratio 72h MA (CryptoQuant); tylko referencyjnie |
 | `fear_greed`        | INT64    | auto (alt.me)     | 0–100; ręcznie tylko fallback |
-| `days_since_ath`    | INT64    | ręczne/computed   | dni od ATH; można liczyć z `ath_date` w kodzie |
-| `ath_date`          | DATE     | **ręczne**        | data ATH cyklu |
+| `days_since_ath`    | INT64    | **computed**      | liczony z `ath_date` (= reading_date − ath_date); ręczny wpis opcjonalny jako fallback gdy brak `ath_date` |
+| `ath_date`          | DATE     | **ręczne**        | data ATH cyklu; wpisujesz RAZ — `days_since_ath` liczy się sam |
 | `notes`             | STRING   | opcjonalne        | komentarz |
 
 Ręcznie wpisujesz głównie: `mvrv_z_score`, `nupl`, `whale_accumulating`, `whale_ratio`,
-`ath_date` (+ ewentualnie `days_since_ath`). `price_usd`, `ma_200w`, `fear_greed` dociąga
-ingestion z API (krok 02) i przez `upsert_reading` dopisuje do tej samej daty.
+`ath_date`. `days_since_ath` jest teraz **computed** z `ath_date` (krok 08) — ręczny wpis
+opcjonalny, służy tylko jako fallback gdy `ath_date` jest puste. `price_usd`, `ma_200w`,
+`fear_greed` dociąga ingestion z API (krok 02) i przez `upsert_reading` dopisuje do tej samej daty.
 
 ## Zakładka `config_thresholds` (external: `config_thresholds_ext`)
 Steruje logiką sygnałów. Dodanie wskaźnika = nowy wiersz tutaj, bez zmian w UI.

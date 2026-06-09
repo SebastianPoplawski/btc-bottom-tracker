@@ -249,6 +249,10 @@ udostępniony SA jako writer.
   pamiętać o tej różnicy.
 - **03 — bool vs liczba:** `whale_accumulating` jest bool; operatory liczbowe celowo go
   odrzucają (`_to_number` zwraca None dla bool), więc działa tylko `is_true`.
+- **08 — `days_since_ath` computed:** liczony automatycznie z `ath_date`
+  (= `reading_date` − `ath_date`; gdy brak `reading_date` → dziś) w `composite.derive_values`.
+  Wpisujesz ATH RAZ, nie aktualizujesz licznika co tydzień. Computed wygrywa z wpisem ręcznym;
+  ręczny `days_since_ath` to fallback gdy `ath_date` puste (seed z oboma null działa bez zmian).
 
 ## Czego pilnować
 
