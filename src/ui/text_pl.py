@@ -26,6 +26,13 @@ SECTION_DCA = "Plan DCA"
 
 MODE_LABEL = {"demo": "DEMO (seed)", "live": "LIVE (BigQuery + Sheets)"}
 
+# Statusy transz DCA (klucz -> etykieta PL) — używane przez components.dca_panel.
+STATUS_PL = {
+    "pending": "oczekująca",
+    "executed": "zrealizowana",
+    "skipped": "pominięta",
+}
+
 # Pomoc do kart wskaźników (krótko, po polsku)
 INDICATOR_HELP = {
     "mvrv_z_score": "MVRV Z-Score — dno gdy < 0 (lookintobitcoin).",
