@@ -1,7 +1,7 @@
 # STATUS / Handover — BTC Bottom Tracker
 
-> Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **05 (wariant Dash)
-> ZAMKNIĘTE**. Projekt funkcjonalnie kompletny (demo + live).
+> Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **08 (computed
+> `days_since_ath` + skrypt `add_reading.py`) ZAMKNIĘTE**. Projekt funkcjonalnie kompletny (demo + live).
 > Wdrożone na Streamlit Community Cloud (APP_MODE=demo): https://btc-bottom-tracker-n5nan3lmjyvhyhcwprxqer.streamlit.app/ — repo PUBLICZNE.
 > Architektura i instrukcje: README.md + docs/SETUP_GCP.md.
 > Ostatnia aktualizacja: 2026-06-09.
@@ -33,6 +33,22 @@
 - [x] **05 — Wariant Dash** — ZROBIONE: `app_dash.py` (korzeń repo, obok app.py). Reużywa
       wspólnych warstw (config + composite.evaluate + dca.compute_dca_state + ingestion);
       z src/ui tylko `text_pl` (czysty), `components.py` NIE importowany. Commit: `d1342a2`.
+- [x] **07 — 200W MA: fallback Kraken** — ZROBIONE: `src/ingestion/price_binance.py` —
+      świece tygodniowe próbują Binance, a przy 451 (geoblok US / Streamlit Cloud) sięgają po
+      Kraken; Binance pozostaje pierwszym źródłem lokalnie (EU). Commity: `4f9593f` (kod),
+      `b9a81f8` (docs). Szczegóły w „Pułapki napotkane".
+- [x] **08 — Computed `days_since_ath` + skrypt `add_reading.py`** — ZROBIONE:
+      - `days_since_ath` liczony automatycznie z `ath_date` w `composite.derive_values`
+        (= `reading_date` − `ath_date`; gdy brak `reading_date` → dziś). **Computed wygrywa
+        z wpisem ręcznym; ręczny = fallback gdy `ath_date` puste** (seed z oboma null bez zmian).
+      - `scripts/add_reading.py` — seamless dopisywanie/upsert tygodniowego odczytu do
+        `indicator_readings` przez gspread (RAW — omija problem przecinka/locale; UPSERT po
+        `reading_date`, bez duplikatów; pola AUTO `price_usd`/`ma_200w`/`fear_greed` zostają puste).
+      - Commity: `011ff41` (kod: days_since_ath computed z ath_date), `00ff026` (docs:
+        days_since_ath computed), `d03e6c7` (skrypt add_reading). **67 testów zielonych.**
+      - **Pętla tygodniowa:** czat researchowy → `python scripts/add_reading.py --mvrv … --nupl …
+        --ath-date …` (bez `--days-ath` — computed; `whale_accumulating` puste dopóki nie ma
+        świeżego netflow z CryptoQuant) → wiersz w arkuszu → dashboard sam się odświeża.
 
 ---
 
