@@ -125,6 +125,16 @@ def derive_values(reading: Any) -> dict[str, Any]:
     out: dict[str, Any] = {k: _get(reading, k) for k in _DIRECT_FIELDS}
     for key, fn in COMPUTED.items():
         out[key] = fn(reading)
+
+    # days_since_ath: gdy podano ath_date, licz automatycznie (computed WYGRYWA z
+    # ręcznym wpisem). Data odniesienia = reading_date z odczytu, a gdy brak -> dziś;
+    # użycie reading_date trzyma funkcję deterministyczną (testy bez zegara).
+    # Brak ath_date -> zostaje wartość ręczna z _DIRECT_FIELDS (wstecznie kompatybilne).
+    ath = _coerce_date(_get(reading, "ath_date"))
+    if ath is not None:
+        ref = _coerce_date(_get(reading, "reading_date")) or date.today()
+        out["days_since_ath"] = (ref - ath).days  # ujemne (ATH w przyszłości) zostawiamy jak jest
+
     return out
 
 

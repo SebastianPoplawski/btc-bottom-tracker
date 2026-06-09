@@ -103,6 +103,62 @@ def test_price_to_200w_ratio_none_when_missing():
 
 
 # --------------------------------------------------------------------------- #
+# days_since_ath: computed z ath_date (08), z fallbackiem na wpis ręczny
+# --------------------------------------------------------------------------- #
+def test_days_since_ath_computed_from_ath_date():
+    # 2025-06-01 -> 2026-06-01 = 365 dni (2026 nie jest przestępny). reading_date
+    # jako data odniesienia -> deterministycznie, bez zegara. days_since_ath puste.
+    reading = {"reading_date": date(2026, 6, 1), "ath_date": date(2025, 6, 1),
+               "days_since_ath": None}
+    assert c.derive_values(reading)["days_since_ath"] == 365
+
+
+def test_days_since_ath_computed_wins_over_manual():
+    # Oba podane -> computed z ath_date wygrywa (nie trzeba synchronizować).
+    reading = {"reading_date": date(2026, 6, 1), "ath_date": date(2025, 6, 1),
+               "days_since_ath": 999}
+    assert c.derive_values(reading)["days_since_ath"] == 365
+
+
+def test_days_since_ath_fallback_to_manual_when_no_ath_date():
+    # Brak ath_date -> zostaje wartość ręczna (wstecznie kompatybilne).
+    reading = {"reading_date": date(2026, 6, 1), "ath_date": None, "days_since_ath": 350}
+    assert c.derive_values(reading)["days_since_ath"] == 350
+
+
+def test_days_since_ath_uses_today_when_reading_date_missing():
+    # Brak reading_date -> data odniesienia = dziś; wynik >= 0 i typu int (nie rzuca).
+    reading = {"ath_date": date(2020, 1, 1), "days_since_ath": None}
+    val = c.derive_values(reading)["days_since_ath"]
+    assert isinstance(val, int) and val > 0
+
+
+def test_days_since_ath_future_ath_not_raising_negative_ok():
+    # ATH w przyszłości (błąd wpisu) -> liczba ujemna, ale bez wyjątku.
+    reading = {"reading_date": date(2026, 6, 1), "ath_date": date(2026, 12, 31),
+               "days_since_ath": None}
+    val = c.derive_values(reading)["days_since_ath"]
+    assert val < 0
+
+
+def test_days_since_ath_computed_drives_signal():
+    # Integracja: computed 365 wpada w between(300,400) -> sygnał met True.
+    reading = seed_reading() | {"ath_date": date(2025, 6, 1)}
+    res = c.evaluate(make_config(), reading)
+    assert _by_key(res, "days_since_ath").value == 365
+    assert _by_key(res, "days_since_ath").met is True
+
+
+def test_seed_both_null_days_since_ath_no_regression():
+    # Seed 2026-06-01: ath_date i days_since_ath oba null -> days_since_ath None,
+    # composite count nadal == 1 (bez regresji).
+    res = c.evaluate(make_config(), seed_reading())
+    assert _by_key(res, "days_since_ath").value is None
+    assert _by_key(res, "days_since_ath").met is None
+    assert res.count_met == 1
+
+
+# --------------------------------------------------------------------------- #
 # Seed 2026-06-01 — composite == 1 (twardy kontrakt z seedem)
 # --------------------------------------------------------------------------- #
 def test_seed_composite_count_is_one():
