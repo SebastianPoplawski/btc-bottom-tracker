@@ -2,6 +2,7 @@
 
 > Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **05 (wariant Dash)
 > ZAMKNIĘTE**. Projekt funkcjonalnie kompletny (demo + live).
+> Wdrożone na Streamlit Community Cloud (APP_MODE=demo): https://btc-bottom-tracker-n5nan3lmjyvhyhcwprxqer.streamlit.app/ — repo PUBLICZNE.
 > Architektura i instrukcje: README.md + docs/SETUP_GCP.md.
 > Ostatnia aktualizacja: 2026-06-09.
 
@@ -118,7 +119,9 @@ ważony `0.5/1.5` → dokładnie `expected_composite_count=1`.
 
 ## Repo / workflow
 
-- **Repo GitHub: `github.com/SebastianPoplawski/btc-bottom-tracker` — PRYWATNE.** Źródło prawdy.
+- **Repo GitHub: `github.com/SebastianPoplawski/btc-bottom-tracker` — PUBLICZNE (zmienione z prywatnego, by Streamlit Community Cloud widział repo; darmowy
+  Community Cloud nie dawał dostępu do prywatnego repo). Historia zweryfikowana — brak
+  realnych sekretów (tylko atrapy w secrets.toml.example); `.gitignore` blokuje klucze.** Źródło prawdy.
   Commity: `a6732e3` (00–02), `6625fb4` (02-API), `dba7fcb` (03), `11f1e68` (docs/hash 03),
   `0878c3c` (04).
 - **Lokalnie:** `C:\Users\sebastian.poplawski\Projects\BTC Bottom Tracker`, venv `.venv`,
@@ -164,6 +167,23 @@ ważony `0.5/1.5` → dokładnie `expected_composite_count=1`.
 
 ---
 
+## Wdrożenie (Streamlit Community Cloud)
+
+- App URL: https://btc-bottom-tracker-n5nan3lmjyvhyhcwprxqer.streamlit.app/ (publiczny).
+  Main file: `app.py`, branch `main`, Python 3.14.
+- `APP_MODE=demo` (seed, bez chmury) — build na 3.14 przeszedł, dashboard renderuje się
+  w całości (gauge 1/6, 6 kart, panel DCA, wykresy, disclaimer). Potwierdzone na żywo.
+- Auto-redeploy po każdym `git push` na `main`.
+- Wariant Dash (app_dash.py) NIE jest deployowany — Streamlit Cloud go nie uruchamia
+  (inny runtime); pozostaje lokalny.
+- Przejście na LIVE bez redeployu: Manage app -> Settings -> Secrets -> wklej treść
+  lokalnego secrets.toml (z kluczem JSON) i zmień APP_MODE na "live" (propaguje ~minutę).
+  Wymaga wcześniej domknięcia sekcji "Do zrobienia ręcznie" (DDL + 3 zakładki w arkuszu).
+- Klucz JSON NIGDY do repo (repo publiczne!) — tylko panel Secrets. .gitignore to egzekwuje,
+  ale przy każdym pushu sprawdzaj listę plików (SETUP_GITHUB.md krok 5).
+
+---
+
 ## Konfiguracja na żywo (do secrets.toml — KLUCZA JSON tu NIE MA)
 
 | Klucz | Wartość |
@@ -188,6 +208,7 @@ udostępniony SA jako writer.
 - **FIX (krok 04): `text_pl.STATUS_PL` brakujące.** `components.dca_panel` wołał `T.STATUS_PL`,
   którego nie było w `text_pl.py` → `AttributeError` przy renderze DCA w Streamlicie. Dodano
   `STATUS_PL` do `text_pl.py`. Commit: `914d7f0`. Wariant Dash używał `dca.STATUS_PL` (odporny).
+  Potwierdzony na żywo na deployu — panel DCA renderuje się poprawnie.
 - **Master prompt (poza repo): „F&G < 20" → „< 25".** README.md i `ddl.sql` już poprawione
   (commit `11f1e68`), ale master prompt Projektu wciąż mówi „< 20" → zaktualizować ręcznie
   na **„< 25"** (zgodnie z configiem i `composite.py`). Niezrobione.
@@ -223,7 +244,7 @@ udostępniony SA jako writer.
 ## Czego pilnować
 
 - Klucz JSON: NIGDY do repo/na czat/na publiczne foldery. Tylko lokalnie + panel Streamlit Cloud.
-- Repo PRYWATNE — `.gitignore` i tak blokuje sekrety; sprawdzać listę przed pushem.
+- Repo PUBLICZNE — `.gitignore` i tak blokuje sekrety; sprawdzać listę przed pushem.
 - Zapytania BQ: `SELECT` tylko potrzebnych kolumn + filtr po dacie (free tier 1 TB/mies.).
 - **Fixture vs config:** `seed_snapshot_2026-06-01.json` ma `expected_composite_count=1` Z REGUŁY
   (F&G<25). Przy zmianie progu/odczytu zaktualizować seed — demo, `test_signals.py` i
