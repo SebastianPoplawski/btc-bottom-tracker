@@ -195,7 +195,7 @@ ważony `0.5/1.5` → dokładnie `expected_composite_count=1`.
 | `CONFIG_TABLE` | `config_thresholds_ext` (native: `config_thresholds`) |
 | `DCA_TABLE` | `dca_tranches_ext` (native: `dca_tranches`) |
 | service account | `btc-tracker-sa@btc-bottom-tracker-498120.iam.gserviceaccount.com` |
-| plik klucza | `btc-bottom-tracker-498120-56eabcdb1342.json` (lokalnie u użytkownika) |
+| plik klucza | `btc-bottom-tracker-498120-56eabcdb1342.json` — trzymany lokalnie POZA repo, w `%USERPROFILE%\.secrets\` (NIE w Downloads, NIE w repo) |
 
 Stan GCP: projekt + billing (alert $1); API (BigQuery/Sheets/Drive) on; dataset `btc_tracker`
 w EU; SA z rolami (Editor/Viewer — do zwężenia do `BigQuery Job User` + `Data Editor`); arkusz
