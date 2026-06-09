@@ -81,6 +81,11 @@ def _parse_klines(raw: list, now_ms: Optional[int] = None) -> list[tuple[date, f
     return out
 
 
+def _kraken_pair_key(result: dict) -> Optional[str]:
+    """Klucz pary w Kraken `result` = jedyny klucz rozny od "last" (zwykle XXBTZUSD)."""
+    return next((k for k in result if k != "last"), None)
+
+
 def _parse_kraken_ohlc(payload: dict, now_ms: Optional[int] = None) -> list[tuple[date, float]]:
     """Surowa odpowiedz Kraken OHLC -> [(data_tygodnia, close)], posortowane rosnaco.
 
@@ -91,7 +96,7 @@ def _parse_kraken_ohlc(payload: dict, now_ms: Optional[int] = None) -> list[tupl
     if now_ms is None:
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     result = payload.get("result", {})
-    pair_key = next((k for k in result if k != "last"), None)
+    pair_key = _kraken_pair_key(result)
     if pair_key is None:
         return []
     out: list[tuple[date, float]] = []
@@ -164,8 +169,34 @@ def fetch_spot_price_coingecko() -> Optional[float]:
     return float(data["bitcoin"]["usd"]) if data.get("bitcoin") else None
 
 
+def _parse_kraken_ticker(payload: dict) -> Optional[float]:
+    """Surowa odpowiedz Kraken Ticker -> ostatnia cena (float) lub None.
+
+    Kraken zwraca {"error":[...], "result": {"<PARA>": {"c": ["<last>", "<lot_vol>"], ...}}}.
+    Klucz pary to jedyny klucz w result (zwykle XXBTZUSD); cena = pole c[0] (string -> float)."""
+    result = payload.get("result", {})
+    pair_key = _kraken_pair_key(result)
+    if pair_key is None:
+        return None
+    c = result[pair_key].get("c")
+    if not c:
+        return None
+    return float(c[0])
+
+
+@_maybe_cache(ttl_seconds=300)
+def fetch_spot_price_kraken(pair: str = KRAKEN_PAIR) -> Optional[float]:
+    payload = _get_json(f"{KRAKEN_BASE}/0/public/Ticker", {"pair": pair})
+    err = payload.get("error") or []
+    if err:  # Kraken sygnalizuje bledy w polu "error" przy HTTP 200
+        raise requests.RequestException(f"Kraken API error: {err}")
+    return _parse_kraken_ticker(payload)
+
+
 def fetch_spot_price() -> tuple[Optional[float], list[str]]:
-    """Binance jako pierwszy, CoinGecko jako fallback. Zwraca (cena, ostrzezenia)."""
+    """Cena spot: Binance -> CoinGecko -> Kraken. Binance geoblokuje US (451), CoinGecko bywa
+    rate-limitowany (429) z IP Streamlit Cloud; Kraken jako kolejny fallback (nie blokuje US).
+    Zwraca (cena, ostrzezenia) — nie rzuca wyjatkow na zewnatrz."""
     warnings: list[str] = []
     try:
         p = fetch_spot_price_binance()
@@ -178,8 +209,15 @@ def fetch_spot_price() -> tuple[Optional[float], list[str]]:
         if p:
             return p, warnings
     except Exception as exc:
-        warnings.append(f"CoinGecko spot niedostepny ({exc}).")
-    warnings.append("Brak ceny spot z obu zrodel.")
+        logger.warning("CoinGecko spot niedostepny (%s); probuje Kraken.", exc)
+        warnings.append(f"CoinGecko spot niedostepny ({exc}); probuje Kraken.")
+    try:
+        p = fetch_spot_price_kraken()
+        if p:
+            return p, warnings
+    except Exception as exc:
+        warnings.append(f"Kraken spot niedostepny ({exc}).")
+    warnings.append("Brak ceny spot ze wszystkich zrodel.")
     return None, warnings
 
 

@@ -65,3 +65,33 @@ def test_parse_kraken_ohlc_picks_pair_key_not_last():
 def test_parse_kraken_ohlc_empty_when_no_pair_key():
     # Defensywnie: brak klucza pary -> pusta lista, bez wyjatku.
     assert pb._parse_kraken_ohlc({"result": {"last": 0}}, now_ms=_NOW_MS) == []
+
+
+# --------------------------------------------------------------------------- #
+# Kraken Ticker (cena spot, fallback po Binance/CoinGecko) — krok 09
+# --------------------------------------------------------------------------- #
+_KRAKEN_TICKER_PAYLOAD = {
+    "error": [],
+    "result": {
+        # c = [last_trade_price, lot_volume]; bierzemy c[0].
+        "XXBTZUSD": {
+            "a": ["64010.0", "1", "1.000"],
+            "b": ["64005.0", "2", "2.000"],
+            "c": ["64007.5", "0.015"],
+            "v": ["100.0", "200.0"],
+        },
+    },
+}
+
+
+def test_parse_kraken_ticker_extracts_last_price():
+    # Cena = c[0] (string -> float), z wlasciwego klucza pary.
+    price = pb._parse_kraken_ticker(_KRAKEN_TICKER_PAYLOAD)
+    assert price == 64007.5
+    assert isinstance(price, float)
+
+
+def test_parse_kraken_ticker_none_when_no_pair_key():
+    # Defensywnie: brak klucza pary -> None, bez wyjatku.
+    assert pb._parse_kraken_ticker({"result": {}}) is None
+    assert pb._parse_kraken_ticker({"result": {"XXBTZUSD": {}}}) is None
