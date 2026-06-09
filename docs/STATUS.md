@@ -1,10 +1,9 @@
 # STATUS / Handover — BTC Bottom Tracker
 
-> Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **04 (UI Streamlit
-> + lekka logika DCA) ZAMKNIĘTE**. Następny krok: **05 — wariant Dash
-> (szkielet do porównania)**.
+> Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **05 (wariant Dash)
+> ZAMKNIĘTE**. Projekt funkcjonalnie kompletny (demo + live).
 > Architektura i instrukcje: README.md + docs/SETUP_GCP.md.
-> Ostatnia aktualizacja: 2026-06-08.
+> Ostatnia aktualizacja: 2026-06-09.
 
 ---
 
@@ -30,7 +29,9 @@
       `src/ingestion/mock.py` (loader seeda), `src/logic/dca.py` (czysta logika DCA),
       `src/ui/components.py` + `src/ui/text_pl.py` (gauge, karty, wykresy, panel DCA),
       `tests/test_dca.py` (**16 testów**). Commit: `0878c3c`. Szczegóły niżej.
-- [ ] **05 — Wariant Dash** — NASTĘPNY KROK (szkielet do porównania ze Streamlitem).
+- [x] **05 — Wariant Dash** — ZROBIONE: `app_dash.py` (korzeń repo, obok app.py). Reużywa
+      wspólnych warstw (config + composite.evaluate + dca.compute_dca_state + ingestion);
+      z src/ui tylko `text_pl` (czysty), `components.py` NIE importowany. Commit: `d1342a2`.
 
 ---
 
@@ -149,15 +150,17 @@ ważony `0.5/1.5` → dokładnie `expected_composite_count=1`.
 
 ---
 
-## DO ROZSTRZYGNIĘCIA na start kroku 05 — Dash (otwarte)
+## Krok 05 — Dash (rozstrzygnięte)
 
-1. **Zakres wariantu Dash:** pełna parzystość ze Streamlitem czy tylko szkielet pokazowy
-   (gauge + karty + werdykt, bez panelu DCA)? Rekomendacja: **szkielet pokazowy** na start.
-2. **Współdzielenie warstw:** Dash konsumuje te same `config` + `composite.evaluate` /
-   `dca.compute_dca_state` (logika jest czysta, zero zależności od Streamlita) — potwierdzić,
-   że nic z `src/ui/` (Streamlit-specyficzne) nie przecieka do wariantu Dash.
-3. **Hosting Dash:** lokalnie do porównania czy też publikacja? (Streamlit Cloud nie uruchomi
-   Dash — inny runtime). Domyślnie: **lokalnie**, bez deployu.
+1. **Zakres:** pełniejsza parzystość niż goły szkielet — header (cena/tryb/świeżość),
+   gauge `count_met/count_active` + werdykt, 6 kart wskaźników, wykresy (cena vs 200W MA,
+   MVRV/NUPL, F&G, whale_ratio ref.), panel DCA z polem ceny (seed ma price_usd=null),
+   przycisk „Odśwież dane", stały disclaimer. UI po polsku.
+2. **Współdzielenie warstw:** ścieżka ładowania danych 1:1 z app.py (_load_demo/_load_live).
+   Z `src/ui/` reużyty TYLKO `text_pl` (bez Streamlita); `components.py` NIE importowany.
+   Prosty cache: klik „Odśwież" przeładowuje dane, zmiana ceny korzysta z cache.
+3. **Hosting:** lokalnie (`app.run`, 127.0.0.1:8050), bez deployu. `server = app.server`
+   zostawiony pod ewentualny WSGI/gunicorn.
 
 ---
 
@@ -182,6 +185,9 @@ udostępniony SA jako writer.
 
 ## Dług techniczny (do sprzątnięcia — NIE blokuje 05)
 
+- **FIX (krok 04): `text_pl.STATUS_PL` brakujące.** `components.dca_panel` wołał `T.STATUS_PL`,
+  którego nie było w `text_pl.py` → `AttributeError` przy renderze DCA w Streamlicie. Dodano
+  `STATUS_PL` do `text_pl.py`. Commit: `914d7f0`. Wariant Dash używał `dca.STATUS_PL` (odporny).
 - **Master prompt (poza repo): „F&G < 20" → „< 25".** README.md i `ddl.sql` już poprawione
   (commit `11f1e68`), ale master prompt Projektu wciąż mówi „< 20" → zaktualizować ręcznie
   na **„< 25"** (zgodnie z configiem i `composite.py`). Niezrobione.
