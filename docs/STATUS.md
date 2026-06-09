@@ -219,6 +219,11 @@ udostępniony SA jako writer.
 2. W arkuszu: 3 zakładki `indicator_readings`, `config_thresholds`, `dca_tranches`. Wkleić
    `data/sheets_tab_config_thresholds.csv` (A:G) i `sheets_tab_dca_tranches.csv` (A:I).
    Nagłówki `indicator_readings` wg `docs/SHEETS_LAYOUT.md`.
+   **Skrót:** `scripts/bootstrap_sheet.py` automatyzuje ten krok — tworzy i wypełnia
+   3 zakładki (`config_thresholds`, `dca_tranches`, `indicator_readings`) w arkuszu.
+   Jest idempotentny (pomija zakładki, które już mają dane; `BTT_BOOTSTRAP_FORCE=1`
+   czyści i nadpisuje). Uruchamiany lokalnie kluczem SA (`GOOGLE_APPLICATION_CREDENTIALS`
+   / `GCP_SERVICE_ACCOUNT_JSON`): `python scripts\bootstrap_sheet.py`.
 3. Uzupełnić wartości ręczne (`mvrv_z_score`, `nupl`, `whale_accumulating`, `ath_date`).
 4. Sekrety: skopiować `.streamlit/secrets.toml.example` → `secrets.toml`, wkleić pola klucza JSON,
    `APP_MODE="live"`.
