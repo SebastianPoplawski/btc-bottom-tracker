@@ -235,6 +235,10 @@ udostępniony SA jako writer.
 - **Org secure-by-default** włączała `iam.disableServiceAccountKeyCreation` — rozwiązane rolą
   `orgpolicy.policyAdmin` na poziomie organizacji `poplawski-sebastian94-org`.
 - External nad Sheets bez scope `auth/drive` => 403.
+- **Binance geoblokuje US (HTTP 451):** z amerykanskich IP (m.in. Streamlit Cloud) `klines`
+  padaja, wiec `ma_200w=None`. Fix (07): w `price_binance.py` swiece tygodniowe maja fallback na
+  Kraken (`/0/public/OHLC`, `interval=10080`) — na chmurze/US ida z Krakena. Binance zostaje
+  pierwszym zrodlem lokalnie (EU).
 - **Konflikt zależności:** `pandas==3.0.3` × `streamlit<3` → ResolutionImpossible. Fix: odpiąć pandas.
 - **PowerShell ≠ cmd:** `set VAR=1` nie działa; używać `$env:VAR = "1"`. venv: `.venv\Scripts\activate`.
 - **02-API live (2026-06-08):** dry-run zwrócił price_usd≈63941, ma_200w≈61827, **fear_greed=8**
