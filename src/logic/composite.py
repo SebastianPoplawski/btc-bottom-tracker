@@ -410,8 +410,8 @@ def results_to_dataframe(result: CompositeResult):
 # --------------------------------------------------------------------------- #
 if __name__ == "__main__":
     seed_config = [
-        {"indicator": "mvrv_z_score",        "operator": "lt",      "threshold_value": 0,    "threshold_value2": None, "weight": 1.0, "active": True,  "description": "Dno: MVRV Z < 0"},
-        {"indicator": "nupl",                "operator": "lt",      "threshold_value": 0,    "threshold_value2": None, "weight": 1.0, "active": True,  "description": "Dno: NUPL < 0"},
+        {"indicator": "mvrv_z_score",        "operator": "lt",      "threshold_value": 0,    "threshold_value2": None, "weight": 0.5, "active": True,  "description": "Dno: MVRV Z < 0 (redundancja z NUPL -> waga 0.5)"},
+        {"indicator": "nupl",                "operator": "lt",      "threshold_value": 0,    "threshold_value2": None, "weight": 0.5, "active": True,  "description": "Dno: NUPL < 0 (redundancja z MVRV-Z -> waga 0.5)"},
         {"indicator": "price_to_200w_ratio", "operator": "lte",     "threshold_value": 1.05, "threshold_value2": None, "weight": 1.0, "active": True,  "description": "Dno: cena <= ~105% 200W MA"},
         {"indicator": "whale_accumulating",  "operator": "is_true", "threshold_value": None, "threshold_value2": None, "weight": 1.0, "active": True,  "description": "Dno: flaga TRUE"},
         {"indicator": "fear_greed",          "operator": "lt",      "threshold_value": 25,   "threshold_value2": None, "weight": 0.5, "active": True,  "description": "Dno: F&G < 25"},

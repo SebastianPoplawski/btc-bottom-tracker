@@ -26,8 +26,8 @@
   ],
 
   "config_thresholds": [
-    { "indicator": "mvrv_z_score",        "operator": "lt",      "threshold_value": 0,    "threshold_value2": null, "weight": 1.0, "active": true, "description": "Dno: MVRV Z < 0" },
-    { "indicator": "nupl",                "operator": "lt",      "threshold_value": 0,    "threshold_value2": null, "weight": 1.0, "active": true, "description": "Dno: NUPL < 0 (kapitulacja)" },
+    { "indicator": "mvrv_z_score",        "operator": "lt",      "threshold_value": 0,    "threshold_value2": null, "weight": 0.5, "active": true, "description": "Dno: MVRV Z < 0 (redundancja z NUPL -> waga 0.5)" },
+    { "indicator": "nupl",                "operator": "lt",      "threshold_value": 0,    "threshold_value2": null, "weight": 0.5, "active": true, "description": "Dno: NUPL < 0 (kapitulacja; redundancja z MVRV-Z -> waga 0.5)" },
     { "indicator": "price_to_200w_ratio", "operator": "lte",     "threshold_value": 1.05, "threshold_value2": null, "weight": 1.0, "active": true, "description": "Dno: cena <= ~105% 200W MA" },
     { "indicator": "whale_accumulating",  "operator": "is_true", "threshold_value": null, "threshold_value2": null, "weight": 1.0, "active": true, "description": "Dno: reczna flaga TRUE; ref. Exchange Whale Ratio 72h MA < 0.85" },
     { "indicator": "fear_greed",          "operator": "lt",      "threshold_value": 25,   "threshold_value2": null, "weight": 0.5, "active": true, "description": "Dno: F&G < 25 = pasmo Extreme Fear alternative.me (0-24); niska waga" },
