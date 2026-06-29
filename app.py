@@ -149,7 +149,9 @@ def main() -> None:
     ui.page_header(settings.mode, data["freshness_msg"], data["as_of"])
 
     # --- Composite (cała logika w composite.evaluate) ---
-    result = composite.evaluate(data["config"], data["reading"])
+    # graded_fng=True: F&G wnosi wkład STOPNIOWY do wyniku ważonego (headline gauge).
+    # Wpływa tylko na weighted_met/weighted_ratio — count_met (twardy licznik) bez zmian.
+    result = composite.evaluate(data["config"], data["reading"], graded_fng=True)
 
     ui.composite_summary(result)
     st.divider()

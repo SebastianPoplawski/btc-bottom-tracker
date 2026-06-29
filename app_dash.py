@@ -361,7 +361,8 @@ def _warnings_block(warns):
 # Budowa zawartosci ze stanu (uzywana w callbacku)
 # --------------------------------------------------------------------------- #
 def build_content(data: dict, price_value) -> list:
-    result = composite.evaluate(data["config"], data["reading"])
+    # graded_fng=True: stopniowy wkład F&G do wyniku ważonego (count_met bez zmian).
+    result = composite.evaluate(data["config"], data["reading"], graded_fng=True)
 
     cp = None
     if price_value not in (None, ""):

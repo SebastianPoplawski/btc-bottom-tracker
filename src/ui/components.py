@@ -70,22 +70,23 @@ def page_header(mode: str, freshness_msg: str, as_of: Any = None) -> None:
 # --------------------------------------------------------------------------- #
 # Composite: gauge + werdykt
 # --------------------------------------------------------------------------- #
-def _gauge_fig(count_met: int, count_active: int):
+def _gauge_fig(weighted_ratio: Optional[float]):
+    """Gauge = wynik WAŻONY (uczciwy headline). Skala 0–100%.
+    weighted_ratio is None (brak ocenialnych) -> pokaż 0 z adnotacją."""
     import plotly.graph_objects as go
-    rng = max(count_active, 1)
+    value = 0 if weighted_ratio is None else weighted_ratio * 100
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
-        value=count_met,
-        number={"suffix": f" / {count_active}", "font": {"size": 40}},
+        value=value,
+        number={"suffix": "%", "font": {"size": 40}},
         gauge={
-            "axis": {"range": [0, rng], "tickmode": "linear", "dtick": 1,
-                     "tickcolor": "#9aa0aa"},
+            "axis": {"range": [0, 100], "ticksuffix": "%", "tickcolor": "#9aa0aa"},
             "bar": {"color": T.ACCENT, "thickness": 0.7},
             "borderwidth": 0,
             "steps": [
-                {"range": [0, rng * 0.34], "color": "#1A1D24"},
-                {"range": [rng * 0.34, rng * 0.67], "color": "#23272f"},
-                {"range": [rng * 0.67, rng], "color": "#2c313a"},
+                {"range": [0, 34], "color": "#1A1D24"},
+                {"range": [34, 67], "color": "#23272f"},
+                {"range": [67, 100], "color": "#2c313a"},
             ],
         },
     ))
@@ -93,6 +94,12 @@ def _gauge_fig(count_met: int, count_active: int):
         height=230, margin=dict(l=20, r=20, t=10, b=10),
         paper_bgcolor="rgba(0,0,0,0)", font={"color": "#FAFAFA"},
     )
+    if weighted_ratio is None:
+        fig.add_annotation(
+            text="brak ocenialnych wskaźników", showarrow=False,
+            x=0.5, y=0.0, xref="paper", yref="paper",
+            font={"color": "#9aa0aa", "size": 12},
+        )
     return fig
 
 
@@ -100,19 +107,19 @@ def composite_summary(result: Any) -> None:
     col_g, col_v = st.columns([0.42, 0.58])
     with col_g:
         st.plotly_chart(
-            _gauge_fig(result.count_met, result.count_active),
+            _gauge_fig(result.weighted_ratio),
             use_container_width=True,
             config={"displayModeBar": False},
         )
+        # Twardy licznik jako podpis pod ważonym headline'em.
+        st.caption(f"Twarde progi: {result.count_met}/{result.count_active} spełnione")
     with col_v:
         st.subheader("Werdykt")
         st.write(result.verdict)
-        wr = result.weighted_ratio
-        if wr is not None:
-            st.caption(
-                f"Wynik ważony: {result.weighted_met:.2f} / {result.weighted_total:.2f} "
-                f"= {wr:.0%} (niuans obok licznika)."
-            )
+        st.caption(T.COMPOSITE_NOTE)
+        if result.weighted_ratio is not None:
+            st.caption("Zegar pokazuje wynik ważony (potwierdzenie dna 0–100%); "
+                       "twardy licznik spełnionych progów jest pod zegarem.")
         missing = result.count_active - result.count_evaluable
         if missing > 0:
             st.caption(f"⚠️ {missing} wskaźnik(i) bez danych — nie wliczają się do licznika.")
@@ -136,6 +143,9 @@ def indicator_grid(result: Any, columns: int = 3) -> None:
 def _indicator_card(container, ind: Any) -> None:
     color = _met_color(ind.met)
     label_met = T.MET_LABEL[ind.met]
+    # Stopniowy F&G: spełniony, ale z wkładem częściowym (0 < contribution < weight).
+    if ind.met is True and 0 < ind.contribution < ind.weight:
+        label_met = "częściowy"
     value_str = T.format_value(ind.indicator, ind.value)
     thr_str = T.format_threshold(ind.operator, ind.threshold_value, ind.threshold_value2)
     help_txt = T.INDICATOR_HELP.get(ind.indicator, "")

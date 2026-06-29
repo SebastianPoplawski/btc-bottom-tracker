@@ -11,7 +11,13 @@ from typing import Optional
 DISCLAIMER = "Narzędzie analityczne, nie porada inwestycyjna."
 
 APP_TITLE = "BTC Bottom Tracker"
-APP_TAGLINE = "Composite Bottom Score — ile sygnałów dna spełnionych jednocześnie"
+APP_TAGLINE = "Composite Bottom Score — ważony wskaźnik potwierdzenia dna (0–100%)"
+
+# Nota metodologiczna do panelu composite (opisowa, nie porada).
+COMPOSITE_NOTE = (
+    "MVRV-Z i NUPL liczą się łącznie jak jeden sygnał wyceny (waga 0.5 każdy — "
+    "redundancja), a Fear & Greed wnosi wkład stopniowo (im głębszy strach, tym większy)."
+)
 
 # Stany sygnału (met -> etykieta + semantyczny kolor)
 MET_LABEL = {True: "spełniony", False: "niespełniony", None: "brak danych"}

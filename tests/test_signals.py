@@ -21,8 +21,8 @@ import composite as c  # noqa: E402
 # --------------------------------------------------------------------------- #
 def make_config():
     return [
-        {"indicator": "mvrv_z_score",        "operator": "lt",      "threshold_value": 0,    "threshold_value2": None, "weight": 1.0, "active": True, "description": ""},
-        {"indicator": "nupl",                "operator": "lt",      "threshold_value": 0,    "threshold_value2": None, "weight": 1.0, "active": True, "description": ""},
+        {"indicator": "mvrv_z_score",        "operator": "lt",      "threshold_value": 0,    "threshold_value2": None, "weight": 0.5, "active": True, "description": ""},
+        {"indicator": "nupl",                "operator": "lt",      "threshold_value": 0,    "threshold_value2": None, "weight": 0.5, "active": True, "description": ""},
         {"indicator": "price_to_200w_ratio", "operator": "lte",     "threshold_value": 1.05, "threshold_value2": None, "weight": 1.0, "active": True, "description": ""},
         {"indicator": "whale_accumulating",  "operator": "is_true", "threshold_value": None, "threshold_value2": None, "weight": 1.0, "active": True, "description": ""},
         {"indicator": "fear_greed",          "operator": "lt",      "threshold_value": 25,   "threshold_value2": None, "weight": 0.5, "active": True, "description": ""},
@@ -220,6 +220,19 @@ def test_graded_toggle_changes_weighted_not_counter():
     assert fng_graded == pytest.approx(0.5 * (25 - 20) / 15)
 
 
+def test_graded_fng_fractional_contribution_band_10_25():
+    # v2 włączony w aplikacji: F&G=12 w paśmie 10–25 -> wkład ułamkowy,
+    # ale licznik twardy (count_met) bez zmian.
+    reading = seed_reading() | {"fear_greed": 12}
+    binary = c.evaluate(make_config(), reading, graded_fng=False)
+    graded = c.evaluate(make_config(), reading, graded_fng=True)
+    assert binary.count_met == graded.count_met        # licznik niezmieniony
+    fng = _by_key(graded, "fear_greed")
+    assert fng.met is True
+    assert fng.contribution == pytest.approx(0.5 * (25 - 12) / 15)
+    assert 0 < fng.contribution < fng.weight           # częściowy, mniej niż pełna waga
+
+
 # --------------------------------------------------------------------------- #
 # Pełne dno — wszystkie 6 spełnione
 # --------------------------------------------------------------------------- #
@@ -233,6 +246,10 @@ def test_full_bottom_all_six():
     assert res.count_met == 6
     assert res.count_evaluable == 6
     assert "Wszystkie warunki dna" in res.verdict
+    # v2 wagi: mvrv0.5 + nupl0.5 + price1.0 + whale1.0 + fng0.5 + days1.0 = 4.5 (było 5.5).
+    assert res.weighted_total == pytest.approx(4.5)
+    assert res.weighted_met == pytest.approx(4.5)
+    assert res.weighted_ratio == pytest.approx(1.0)
 
 
 # --------------------------------------------------------------------------- #
