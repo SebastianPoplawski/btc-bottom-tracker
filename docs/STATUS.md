@@ -1,7 +1,7 @@
 # STATUS / Handover — BTC Bottom Tracker
 
-> Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **11 (Composite v2 —
-> wynik ważony jako headline) ZAMKNIĘTE**. Projekt funkcjonalnie kompletny (demo + live).
+> Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **12 (automatyzacja —
+> GitHub Actions cron codziennego ingestu) ZAMKNIĘTE**. Projekt funkcjonalnie kompletny (demo + live).
 > Wdrożone na Streamlit Community Cloud (APP_MODE=demo): https://btc-bottom-tracker-n5nan3lmjyvhyhcwprxqer.streamlit.app/ — repo PUBLICZNE.
 > Architektura i instrukcje: README.md + docs/SETUP_GCP.md.
 > Ostatnia aktualizacja: 2026-06-09.
@@ -71,6 +71,21 @@
       - `APP_TAGLINE` → opis wyniku ważonego; `COMPOSITE_NOTE` (MVRV-Z+NUPL łącznie, F&G stopniowo).
       - **DCA nietknięte** (patrzy na `count_met`). Testy: fixture wag 0.5, all-six weighted 5.5→4.5,
         nowy test ułamkowego wkładu F&G; seed `count_met==1` bez zmian. **73 testy zielone.**
+- [x] **12 — Automatyzacja: GitHub Actions cron** — ZROBIONE: `.github/workflows/ingest.yml`
+      (`ingest-daily`) odpala `python src/ingestion/run_ingest.py` **codziennie 06:00 UTC** + ręcznie
+      przez **workflow_dispatch**. Sekret klucza SA: **`GCP_SA_KEY`** w GitHub → Settings → Secrets
+      and variables → Actions; zapisywany do pliku z env (`printf '%s' "$GCP_SA_KEY" > $RUNNER_TEMP/sa.json`,
+      nie inline → nie trafia do logów), `GOOGLE_APPLICATION_CREDENTIALS` wskazuje ten plik (czytają go
+      i `bigquery_client`, i `sheets`). Runner efemeryczny — klucz znika po jobie.
+      - **Bezpieczeństwo (repo PUBLICZNE):** wyzwalacze tylko `schedule` + `workflow_dispatch` (BEZ
+        `pull_request`), `permissions: contents: read`, `concurrency` bez równoległych przebiegów —
+        sekret NIE wycieka do forków/PR.
+      - **Obserwowalność:** `run_ingest.__main__` kończy `sys.exit(1)`, gdy zapis do BQ się nie powiódł
+        (`rows_affected is None` = wyjątek w `upsert_reading`) — cron sygnalizuje awarię mailem, zamiast
+        „cicho" przejść. Dry-run i udany zapis (0/1) → exit 0.
+      - **Uwaga do logów:** z runnera US Binance zwraca **451** → cena spot i 200W MA idą z **Krakena**
+        (fallback z kroków 07/09). To NORMALNE w logach CI, nie błąd. Python w CI = **3.13** (stabilne
+        wheele dla przypiętych zależności; lokalnie 3.14).
 
 ---
 
