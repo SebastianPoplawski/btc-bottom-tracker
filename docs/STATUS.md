@@ -1,7 +1,7 @@
 # STATUS / Handover — BTC Bottom Tracker
 
-> Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **10 (historia BQ
-> włączona — tabela tworzona automatycznie) ZAMKNIĘTE**. Projekt funkcjonalnie kompletny (demo + live).
+> Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **11 (Composite v2 —
+> wynik ważony jako headline) ZAMKNIĘTE**. Projekt funkcjonalnie kompletny (demo + live).
 > Wdrożone na Streamlit Community Cloud (APP_MODE=demo): https://btc-bottom-tracker-n5nan3lmjyvhyhcwprxqer.streamlit.app/ — repo PUBLICZNE.
 > Architektura i instrukcje: README.md + docs/SETUP_GCP.md.
 > Ostatnia aktualizacja: 2026-06-09.
@@ -57,6 +57,20 @@
       (MERGE = idempotentne; `--dry-run` podgląda; days_since_ath dolicza z ath_date jak ingest).
       Dzięki temu `read_history` przestaje zwracać 404 — **wykresy zasilane z `indicator_readings`**.
       Testy: `tests/test_backfill.py` (DDL + logika backfillu). **72 testy zielone.**
+- [x] **11 — Composite v2: redundancja + stopniowy F&G + uczciwy gauge** — ZROBIONE:
+      - **Stopniowy F&G włączony** w aplikacji: `composite.evaluate(..., graded_fng=True)` w `app.py`
+        i `app_dash.py`. Wpływa tylko na `weighted_met`/`weighted_ratio`, **nie** na `count_met`.
+      - **Wagi redundancji:** `mvrv_z_score` i `nupl` = **0.5** (liczą się łącznie jak jeden sygnał
+        wyceny) — zmienione w demo/seed/CSV/DDL. **Config live jest w arkuszu** (`config_thresholds_ext`)
+        — kod go NIE edytuje; wagę zmienia się tam. F&G zostaje 0.5.
+      - **Gauge = wynik ważony** (uczciwy headline): `_gauge_fig` pokazuje `weighted_ratio*100` jako
+        `%` (skala 0–100, strefy 0–34/34–67/67–100); `None` → 0 z adnotacją. Pod gauge podpis
+        z twardym licznikiem `Twarde progi: count_met/count_active`. Werdykt: liczbę ważoną przejął
+        gauge, w tekście zostało zdanie kontekstowe + nota metodologiczna.
+      - Karta F&G: przy wkładzie częściowym (0<contribution<weight) chip „częściowy" zamiast „spełniony".
+      - `APP_TAGLINE` → opis wyniku ważonego; `COMPOSITE_NOTE` (MVRV-Z+NUPL łącznie, F&G stopniowo).
+      - **DCA nietknięte** (patrzy na `count_met`). Testy: fixture wag 0.5, all-six weighted 5.5→4.5,
+        nowy test ułamkowego wkładu F&G; seed `count_met==1` bez zmian. **73 testy zielone.**
 
 ---
 

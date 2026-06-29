@@ -56,14 +56,18 @@ Wiersze (stan z Twojego CSV — źródło prawdy):
 
 | indicator             | operator | threshold_value | threshold_value2 | weight | active | description |
 |-----------------------|----------|-----------------|------------------|--------|--------|-------------|
-| `mvrv_z_score`        | lt       | 0               |                  | 1.0    | TRUE   | Dno: MVRV Z < 0 |
-| `nupl`                | lt       | 0               |                  | 1.0    | TRUE   | Dno: NUPL < 0 (kapitulacja) |
+| `mvrv_z_score`        | lt       | 0               |                  | 0.5    | TRUE   | Dno: MVRV Z < 0 (redundancja z NUPL → 0.5) |
+| `nupl`                | lt       | 0               |                  | 0.5    | TRUE   | Dno: NUPL < 0 (kapitulacja; redundancja z MVRV-Z → 0.5) |
 | `price_to_200w_ratio` | lte      | 1.05            |                  | 1.0    | TRUE   | Dno: cena ≤ ~105% 200W MA |
 | `whale_accumulating`  | is_true  |                 |                  | 1.0    | TRUE   | Dno: ręczna flaga TRUE; ref. EWR 72h MA < 0.85 |
-| `fear_greed`          | lt       | 25              |                  | 0.5    | TRUE   | Dno: F&G < 25 (Extreme Fear 0–24); niska waga |
+| `fear_greed`          | lt       | 25              |                  | 0.5    | TRUE   | Dno: F&G < 25 (Extreme Fear 0–24); niska waga, wkład stopniowy |
 | `days_since_ath`      | between  | 300             | 400              | 1.0    | TRUE   | Dno: ~10–13 mies. od ATH |
 
 > Uwaga: `price_to_200w_ratio` jest **computed** = `price_usd / ma_200w` (logika 03), nie kolumna w readings.
+> **Composite v2 (krok 11):** `mvrv_z_score` i `nupl` mają wagę **0.5** (są redundantne — liczą się
+> łącznie jak jeden sygnał wyceny). F&G wnosi wkład **stopniowo** (`graded_fng=True` w aplikacji). To
+> wpływa wyłącznie na **wynik ważony** (headline gauge 0–100%), nie na twardy licznik `count_met`.
+> **Wagę zmienia się TU, w arkuszu** (config live = `config_thresholds_ext`) — kod jej nie nadpisuje.
 
 ## Zakładka `dca_tranches` (external: `dca_tranches_ext`)
 
