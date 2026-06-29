@@ -119,6 +119,11 @@ def ingest_today(reading_date: Optional[date] = None,
 
 if __name__ == "__main__":
     import os
+    import sys
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")  # Windows cp1252 safe (PL znaki w warningach)
+    except Exception:
+        pass
     logging.basicConfig(level=logging.INFO)
     res = ingest_today(dry_run=(os.getenv("BTT_DRY_RUN") == "1"))
     print(f"reading_date={res.reading_date}  rows_affected={res.rows_affected}")
