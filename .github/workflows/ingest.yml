@@ -1,0 +1,49 @@
+# Codzienny ingest do BigQuery (krok 12).
+# Wyzwalacze CELOWO tylko schedule + workflow_dispatch — repo jest PUBLICZNE,
+# wiec NIE dodajemy pull_request (sekret GCP_SA_KEY nie wycieka do forkow/PR).
+name: ingest-daily
+
+on:
+  schedule:
+    - cron: "0 6 * * *"   # codziennie 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ingest-daily
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    env:
+      GCP_PROJECT_ID: btc-bottom-tracker-498120
+      BQ_DATASET: btc_tracker
+      BQ_LOCATION: EU
+      GOOGLE_SHEET_ID: 19GCtFyNBKBEj3-jWOLYfNBEd-7jVIXigkDJBGW0vHRY
+      APP_MODE: live
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # Python 3.13 w CI — stabilne wheele dla przypietych zaleznosci.
+          # CI tylko ingestuje (nie potrzebuje 3.14 jak lokalne srodowisko).
+          python-version: "3.13"
+          cache: pip
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Write SA key
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        # Klucz zapisywany Z ENV (nie inline w komendzie) — nie trafia do logow.
+        run: printf '%s' "$GCP_SA_KEY" > "${RUNNER_TEMP}/sa.json"
+      - name: Run ingest
+        env:
+          # Ten plik czytaja i bigquery_client, i sheets. Runner jest efemeryczny —
+          # klucz znika razem z maszyna po zakonczeniu joba.
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+        run: python src/ingestion/run_ingest.py
