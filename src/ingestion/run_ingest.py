@@ -107,6 +107,9 @@ def ingest_today(reading_date: Optional[date] = None,
         warnings.append("dry_run=True — nie zapisano do BigQuery.")
     else:
         try:
+            # Swieze srodowisko samo sie inicjalizuje (idempotentne).
+            wh.ensure_dataset()
+            wh.ensure_readings_table()
             rows = wh.upsert_reading(reading_date, values)
         except Exception as exc:
             warnings.append(f"upsert_reading nie powiodl sie: {exc}")

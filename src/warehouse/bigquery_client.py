@@ -146,6 +146,37 @@ def execute_sql(sql: str) -> None:
         raise
 
 
+def ensure_readings_table() -> None:
+    """Tworzy natywną tabelę `indicator_readings`, jeśli nie istnieje (idempotentne).
+
+    Kolumny przepisane 1:1 z `src/warehouse/ddl.sql` (CREATE TABLE IF NOT EXISTS
+    ... indicator_readings). Referencja tabeli z modułowych stałych
+    (PROJECT_ID/DATASET/TABLE_READINGS) — bez hardkodowania projektu. Pozostałych
+    tabel (dca/config) tu NIE tworzymy — appka czyta je z arkusza.
+    """
+    table = f"`{PROJECT_ID}.{DATASET}.{TABLE_READINGS}`"
+    sql = f"""
+    CREATE TABLE IF NOT EXISTS {table} (
+      reading_date    DATE      NOT NULL OPTIONS(description="Dzień odczytu — klucz logiczny dla upsertu (MERGE)"),
+      price_usd       NUMERIC   OPTIONS(description="Cena BTC, zamknięcie dnia, USD"),
+      mvrv_z_score    NUMERIC   OPTIONS(description="MVRV Z-Score; dno gdy < 0"),
+      nupl            NUMERIC   OPTIONS(description="NUPL; dno gdy < 0 (kapitulacja)"),
+      ma_200w         NUMERIC   OPTIONS(description="200-tyg. średnia krocząca ceny, USD"),
+      whale_accumulating BOOL   OPTIONS(description="SYGNAŁ dna (ręczny TRUE/FALSE): czy wieloryby akumulują — NADRZĘDNY"),
+      whale_ratio     NUMERIC   OPTIONS(description="Opcjonalna wartość ref.: Exchange Whale Ratio 72h MA (CryptoQuant)"),
+      fear_greed      INT64     OPTIONS(description="Fear & Greed 0..100; dno gdy < 25 (pasmo Extreme Fear 0-24)"),
+      days_since_ath  INT64     OPTIONS(description="Dni od ATH; dno ~300-400 (10-13 mies.)"),
+      ath_date        DATE      OPTIONS(description="Data ATH (opcjonalnie, do przeliczeń)"),
+      notes           STRING    OPTIONS(description="Notatka ręczna"),
+      inserted_at     TIMESTAMP OPTIONS(description="Czas pierwszego zapisu wiersza"),
+      updated_at      TIMESTAMP OPTIONS(description="Czas ostatniej modyfikacji")
+    )
+    OPTIONS(description="Dzienna historia surowych odczytów wskaźników dna BTC")
+    """
+    execute_sql(sql)
+    logger.info("Tabela %s gotowa.", TABLE_READINGS)
+
+
 # ------------------------------------------------------------------
 # Zapis odczytu — upsert po dacie (MERGE; BigQuery nie ma UPSERT)
 # ------------------------------------------------------------------
