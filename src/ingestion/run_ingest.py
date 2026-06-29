@@ -125,8 +125,15 @@ if __name__ == "__main__":
     except Exception:
         pass
     logging.basicConfig(level=logging.INFO)
-    res = ingest_today(dry_run=(os.getenv("BTT_DRY_RUN") == "1"))
+    dry_run = os.getenv("BTT_DRY_RUN") == "1"
+    res = ingest_today(dry_run=dry_run)
     print(f"reading_date={res.reading_date}  rows_affected={res.rows_affected}")
     print("values:", res.values)
     for w in res.warnings:
         print("  !", w)
+
+    # Obserwowalnosc crona: udany zapis daje rows_affected = int (0/1); None oznacza,
+    # ze upsert_reading rzucil wyjatek. Zakoncz exit 1, by GitHub Actions zasygnalizowal
+    # awarie (mail), zamiast "cicho" przejsc. Dry-run zawsze konczy sie sukcesem.
+    if not dry_run and res.rows_affected is None:
+        sys.exit(1)
