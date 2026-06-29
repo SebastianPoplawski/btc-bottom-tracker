@@ -1,10 +1,11 @@
 # STATUS / Handover — BTC Bottom Tracker
 
 > Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **12 (automatyzacja —
-> GitHub Actions cron codziennego ingestu) ZAMKNIĘTE**. Projekt funkcjonalnie kompletny (demo + live).
-> Wdrożone na Streamlit Community Cloud (APP_MODE=demo): https://btc-bottom-tracker-n5nan3lmjyvhyhcwprxqer.streamlit.app/ — repo PUBLICZNE.
+> GitHub Actions cron codziennego ingestu) ZAMKNIĘTE; `ingest-daily` DZIAŁA NA ŻYWO**. Projekt
+> funkcjonalnie kompletny (demo + live).
+> Wdrożone na Streamlit Community Cloud (APP_MODE=live — aplikacja działa w trybie live: BigQuery + Sheets): https://btc-bottom-tracker-n5nan3lmjyvhyhcwprxqer.streamlit.app/ — repo PUBLICZNE.
 > Architektura i instrukcje: README.md + docs/SETUP_GCP.md.
-> Ostatnia aktualizacja: 2026-06-09.
+> Ostatnia aktualizacja: 2026-06-29.
 
 ---
 
@@ -86,6 +87,12 @@
       - **Uwaga do logów:** z runnera US Binance zwraca **451** → cena spot i 200W MA idą z **Krakena**
         (fallback z kroków 07/09). To NORMALNE w logach CI, nie błąd. Python w CI = **3.13** (stabilne
         wheele dla przypiętych zależności; lokalnie 3.14).
+      - **POTWIERDZONE NA ŻYWO (2026-06-29):** sekret `GCP_SA_KEY` dodany w GitHub (repo secret, Actions);
+        pierwszy ręczny przebieg (`workflow_dispatch`) zakończył się **sukcesem (`rows_affected=1`)** —
+        automat dopisuje dzienny odczyt do `indicator_readings` w BQ. Cron 06:00 UTC od teraz leci sam.
+      - **Bezpieczeństwo — klucz SA w DWÓCH miejscach:** ten sam klucz jest teraz w Streamlit Cloud
+        (Secrets) **oraz** w GitHub Secrets. Podwójne przechowywanie podnosi wagę **zwężenia ról SA**
+        (patrz dług techniczny C — teraz priorytetowe).
 
 ---
 
@@ -265,6 +272,10 @@ udostępniony SA jako writer.
 - **[ZROBIONE] Master prompt: „F&G < 25".** README.md, `ddl.sql` (commit `11f1e68`) oraz
   master prompt Projektu (instrukcje w ustawieniach Claude) — wszystkie spójne z configiem
   i `composite.py`. Dług zamknięty.
+- **[C — PRIORYTET] Zwężenie ról SA.** Service account ma szerokie `Editor`/`Viewer` — zwęzić do
+  **`BigQuery Job User`** + **`BigQuery Data Editor`** (i Sheets/Drive tylko tam, gdzie wymagane).
+  Priorytet podniesiony w kroku 12: ten sam klucz SA leży teraz w **dwóch** miejscach (Streamlit
+  Cloud + GitHub Secrets), więc minimalizacja uprawnień ogranicza skutki ewentualnego wycieku.
 
 ## Do zrobienia ręcznie zanim ruszy LIVE (po stronie użytkownika)
 
