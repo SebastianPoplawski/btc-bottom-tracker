@@ -1,7 +1,7 @@
 # STATUS / Handover — BTC Bottom Tracker
 
-> Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **08 (computed
-> `days_since_ath` + skrypt `add_reading.py`) ZAMKNIĘTE**. Projekt funkcjonalnie kompletny (demo + live).
+> Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **10 (historia BQ
+> włączona — tabela tworzona automatycznie) ZAMKNIĘTE**. Projekt funkcjonalnie kompletny (demo + live).
 > Wdrożone na Streamlit Community Cloud (APP_MODE=demo): https://btc-bottom-tracker-n5nan3lmjyvhyhcwprxqer.streamlit.app/ — repo PUBLICZNE.
 > Architektura i instrukcje: README.md + docs/SETUP_GCP.md.
 > Ostatnia aktualizacja: 2026-06-09.
@@ -49,6 +49,14 @@
       - **Pętla tygodniowa:** czat researchowy → `python scripts/add_reading.py --mvrv … --nupl …
         --ath-date …` (bez `--days-ath` — computed; `whale_accumulating` puste dopóki nie ma
         świeżego netflow z CryptoQuant) → wiersz w arkuszu → dashboard sam się odświeża.
+- [x] **10 — Historia BQ włączona** — ZROBIONE: tabela `indicator_readings` jest tworzona
+      **automatycznie** (idempotentnie) przy pierwszym zapisie — `bigquery_client.ensure_readings_table()`
+      (kolumny 1:1 z `ddl.sql`, `CREATE TABLE IF NOT EXISTS`), wołane w `run_ingest.ingest_today`
+      (gałąź zapisu, NIE dry-run) tuż obok `ensure_dataset()`. Świeże środowisko inicjalizuje się
+      samo. Nowy `scripts/backfill_history.py` przepisuje istniejące odczyty z arkusza → BQ
+      (MERGE = idempotentne; `--dry-run` podgląda; days_since_ath dolicza z ath_date jak ingest).
+      Dzięki temu `read_history` przestaje zwracać 404 — **wykresy zasilane z `indicator_readings`**.
+      Testy: `tests/test_backfill.py` (DDL + logika backfillu). **72 testy zielone.**
 
 ---
 
@@ -231,7 +239,9 @@ udostępniony SA jako writer.
 
 ## Do zrobienia ręcznie zanim ruszy LIVE (po stronie użytkownika)
 
-1. Uruchomić DDL z `src/warehouse/ddl.sql` (tabele native + external).
+1. DDL: tabela native `indicator_readings` tworzy się **sama** (run_ingest/backfill —
+   `ensure_readings_table`). Ręcznie z `src/warehouse/ddl.sql` trzeba odpalić już tylko
+   tabele EXTERNAL (`config_thresholds_ext`, `dca_tranches_ext`) podpięte pod arkusz.
 2. W arkuszu: 3 zakładki `indicator_readings`, `config_thresholds`, `dca_tranches`. Wkleić
    `data/sheets_tab_config_thresholds.csv` (A:G) i `sheets_tab_dca_tranches.csv` (A:I).
    Nagłówki `indicator_readings` wg `docs/SHEETS_LAYOUT.md`.
