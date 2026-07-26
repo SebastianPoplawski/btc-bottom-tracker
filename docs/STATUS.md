@@ -128,6 +128,25 @@
         `expected_macro_count=0`; `expected_composite_count=1` BEZ ZMIAN.
         Testy: `tests/test_schema_v13.py` (17 testów) + zaktualizowany `test_backfill`.
         **90 testów zielonych.**
+- [x] **14 — Warstwa sprzedaży: LOGIKA (composite side-aware)** — ZROBIONE:
+      - **Computed `pi_cycle_crossed`** w rejestrze `COMPUTED`: True gdy `ma_111d >= 2*ma_350d`,
+        None gdy brak którejś MA (bool — operator `is_true`, jak whale).
+      - **Computed `months_since_halving`** w `derive_values`: `(reading_date − halving_date)
+        / 30.4375` — ten sam wzorzec co `days_since_ath` (halving wpisujesz RAZ). Brak
+        `halving_date` → brak danych (met=None).
+      - **`graded_greed`** (lustro graded F&G): 0 dla ≤75, liniowo 75→90, pełny ≥90.
+        W `evaluate` KIERUNEK wybiera operator wiersza F&G: `lt/lte` → graded fear (dno),
+        `gt/gte` → graded greed (szczyt) — evaluate pozostaje side-agnostyczny. Wpływa
+        tylko na `weighted_*`, licznik binarny bez zmian.
+      - **Werdykty side-aware:** `build_verdict(..., side=)` — teksty dna (jak dotąd,
+        3-arg = kompatybilne wstecznie), szczytu („X z N warunków szczytu…") i makro
+        („Otoczenie makro: X z N warunków risk-off…"). Bez „kup/sprzedaj" (test pilnuje).
+      - **`evaluate_side(config, reading, side, graded_fng)`** — wejście dla UI (krok 17):
+        filter_side + evaluate + właściwy werdykt w jednym.
+      - Na seedzie: bottom 1/6 (bez zmian), top 0/6 (evaluable=2: F&G 23→False,
+        months ~25.4→False — halving 2024-04-20 poza oknem 12–18; sygnał realnie na
+        NASTĘPNY cykl), macro 0/4 (brak danych). Testy: `tests/test_topside.py` (18).
+        **108 testów zielonych.**
 
 ---
 

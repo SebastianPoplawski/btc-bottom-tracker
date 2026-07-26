@@ -128,10 +128,24 @@ def _safe_div(a: Any, b: Any) -> Optional[float]:
     return na / nb
 
 
+def _pi_cycle_crossed(reading: Any) -> Optional[bool]:
+    """Pi Cycle Top (krok 14): True gdy 111DMA >= 2 x 350DMA; None gdy brak MA.
+    Bool celowo — w configu operator `is_true` (jak whale_accumulating)."""
+    ma111 = _to_number(_get(reading, "ma_111d"))
+    ma350 = _to_number(_get(reading, "ma_350d"))
+    if ma111 is None or ma350 is None:
+        return None
+    return ma111 >= 2.0 * ma350
+
+
 # klucz wskaźnika -> funkcja licząca wartość z surowego odczytu
 COMPUTED = {
     "price_to_200w_ratio": lambda r: _safe_div(_get(r, "price_usd"), _get(r, "ma_200w")),
+    "pi_cycle_crossed": _pi_cycle_crossed,
 }
+
+# Średnia długość miesiąca (365.25/12) — do months_since_halving.
+_DAYS_PER_MONTH = 30.4375
 
 # wskaźniki czytane wprost z kolumn `indicator_readings`
 _DIRECT_FIELDS = ("mvrv_z_score", "nupl", "fear_greed", "days_since_ath", "whale_accumulating")
@@ -151,6 +165,14 @@ def derive_values(reading: Any) -> dict[str, Any]:
     if ath is not None:
         ref = _coerce_date(_get(reading, "reading_date")) or date.today()
         out["days_since_ath"] = (ref - ath).days  # ujemne (ATH w przyszłości) zostawiamy jak jest
+
+    # months_since_halving (krok 14): computed z halving_date — ten sam wzorzec co
+    # days_since_ath (halving wpisujesz RAZ, licznik liczy się sam; deterministycznie
+    # względem reading_date). Brak halving_date -> brak klucza -> met=None (brak danych).
+    halving = _coerce_date(_get(reading, "halving_date"))
+    if halving is not None:
+        ref = _coerce_date(_get(reading, "reading_date")) or date.today()
+        out["months_since_halving"] = (ref - halving).days / _DAYS_PER_MONTH
 
     return out
 
@@ -212,6 +234,23 @@ def graded_fear_greed(value: Any) -> Optional[float]:
     if num <= 10:
         return 1.0
     return (25.0 - num) / 15.0
+
+
+def graded_greed(value: Any) -> Optional[float]:
+    """
+    LUSTRO graded_fear_greed dla strony TOP (krok 14): wkład stopniowy F&G w [0,1]
+    po stronie chciwości — zero dla <=75, liniowo 75..90, pełny dla >=90.
+    Używany gdy evaluate(..., graded_fng=True) a wiersz F&G ma operator gt/gte
+    (czyli próg szczytu). Licznik count_met pozostaje binarny.
+    """
+    num = _to_number(value)
+    if num is None:
+        return None
+    if num <= 75:
+        return 0.0
+    if num >= 90:
+        return 1.0
+    return (num - 75.0) / 15.0
 
 
 # --------------------------------------------------------------------------- #
@@ -318,39 +357,71 @@ class CompositeResult:
 # --------------------------------------------------------------------------- #
 # Werdykt PL (opisowy, bez „kup/sprzedaj")
 # --------------------------------------------------------------------------- #
-def build_verdict(count_met: int, count_active: int, count_evaluable: int) -> str:
+def build_verdict(count_met: int, count_active: int, count_evaluable: int,
+                  side: str = SIDE_BOTTOM) -> str:
+    """Werdykt PL zależny od strony (krok 14). Sygnatura 3-argumentowa
+    (bez side) zachowuje się jak przed krokiem 14 — kompatybilność wsteczna."""
+    side = _clean_side(side)
     missing = count_active - count_evaluable
-    base = f"Wg reguł frameworka: {count_met} z {count_active} warunków dna spełnionych"
+
+    if side == SIDE_MACRO:
+        base = f"Otoczenie makro: {count_met} z {count_active} warunków risk-off spełnionych"
+    else:
+        czego = "dna" if side == SIDE_BOTTOM else "szczytu"
+        base = f"Wg reguł frameworka: {count_met} z {count_active} warunków {czego} spełnionych"
     if missing > 0:
         base += f" ({missing} bez danych)"
     base += "."
 
     if count_active == 0:
         tag = "Brak aktywnych progów w konfiguracji."
-    elif count_met == 0:
-        tag = "Żaden sygnał dna nie jest aktywny."
-    elif count_met <= 2:
-        tag = "Pojedyncze, wczesne sygnały — obraz daleki od potwierdzenia dna."
-    elif count_met <= 4:
-        tag = "Obraz mieszany — część warunków dna spełniona."
-    elif count_met == count_active and missing == 0:
-        tag = "Wszystkie warunki dna spełnione jednocześnie wg frameworka."
+    elif side == SIDE_MACRO:
+        if count_met == 0:
+            tag = "Brak sygnałów zacieśnienia — otoczenie neutralne/sprzyjające wg tych reguł."
+        elif count_met * 2 <= count_active:
+            tag = "Częściowe sygnały risk-off — otoczenie mieszane."
+        else:
+            tag = "Przewaga sygnałów risk-off — otoczenie niesprzyjające wg tych reguł."
+    elif side == SIDE_TOP:
+        if count_met == 0:
+            tag = "Żaden sygnał szczytu nie jest aktywny."
+        elif count_met <= 2:
+            tag = "Pojedyncze sygnały przegrzania — obraz daleki od potwierdzenia szczytu."
+        elif count_met <= 4:
+            tag = "Obraz mieszany — część warunków szczytu spełniona."
+        elif count_met == count_active and missing == 0:
+            tag = "Wszystkie warunki szczytu spełnione jednocześnie wg frameworka."
+        else:
+            tag = "Większość warunków szczytu spełniona wg frameworka."
     else:
-        tag = "Większość warunków dna spełniona wg frameworka."
+        if count_met == 0:
+            tag = "Żaden sygnał dna nie jest aktywny."
+        elif count_met <= 2:
+            tag = "Pojedyncze, wczesne sygnały — obraz daleki od potwierdzenia dna."
+        elif count_met <= 4:
+            tag = "Obraz mieszany — część warunków dna spełniona."
+        elif count_met == count_active and missing == 0:
+            tag = "Wszystkie warunki dna spełnione jednocześnie wg frameworka."
+        else:
+            tag = "Większość warunków dna spełniona wg frameworka."
     return f"{base} {tag}"
 
 
 # --------------------------------------------------------------------------- #
 # Główna funkcja
 # --------------------------------------------------------------------------- #
-def evaluate(config: Any, reading: Any, graded_fng: bool = False) -> CompositeResult:
+def evaluate(config: Any, reading: Any, graded_fng: bool = False,
+             side: str = SIDE_BOTTOM) -> CompositeResult:
     """
     Ocenia komplet wskaźników względem configu dla jednego odczytu.
 
     config: DataFrame/list[dict] z kolumnami indicator, operator, threshold_value,
-            threshold_value2, weight, active, description.
+            threshold_value2, weight, active, description [, side].
     reading: Mapping/Series/dict (lub 1-wierszowy DataFrame) z surowymi odczytami.
-    graded_fng: gdy True, F&G wnosi wkład stopniowy do weighted_met (licznik bez zmian).
+    graded_fng: gdy True, F&G wnosi wkład stopniowy do weighted_met (licznik bez
+                zmian); strona wkładu (fear/greed) rozpoznawana po operatorze wiersza.
+    side: wpływa WYŁĄCZNIE na tekst werdyktu (dno/szczyt/risk-off) — NIE filtruje
+          configu (od tego jest filter_side / evaluate_side).
     """
     warnings: list[str] = []
 
@@ -382,7 +453,10 @@ def evaluate(config: Any, reading: Any, graded_fng: bool = False) -> CompositeRe
         weight = row["weight"]
         if met is True:
             if graded_fng and ind == "fear_greed":
-                g = graded_fear_greed(value)
+                # Kierunek progu rozstrzyga stronę: lt/lte = próg DNA (Extreme Fear),
+                # gt/gte = próg SZCZYTU (Extreme Greed) — krok 14. Dzięki temu
+                # evaluate pozostaje side-agnostyczny.
+                g = graded_greed(value) if op in ("gt", "gte") else graded_fear_greed(value)
                 contribution = weight * (g if g is not None else 1.0)
             else:
                 contribution = weight
@@ -428,10 +502,21 @@ def evaluate(config: Any, reading: Any, graded_fng: bool = False) -> CompositeRe
         weighted_total=weighted_total,
         weighted_ratio=weighted_ratio,
         indicators=results,
-        verdict=build_verdict(count_met, count_active, count_evaluable),
+        verdict=build_verdict(count_met, count_active, count_evaluable, side),
         warnings=warnings,
         as_of=_coerce_date(_get(reading, "reading_date")),
     )
+
+
+def evaluate_side(config: Any, reading: Any, side: str = SIDE_BOTTOM,
+                  graded_fng: bool = False) -> CompositeResult:
+    """
+    Wygodne wejście dla aplikacji (krok 14): filtruje config po stronie i ocenia
+    z werdyktem właściwym dla tej strony. Równoważne:
+        evaluate(filter_side(config, side), reading, graded_fng=..., side=side)
+    """
+    want = _clean_side(side)
+    return evaluate(filter_side(config, want), reading, graded_fng=graded_fng, side=want)
 
 
 def results_to_dataframe(result: CompositeResult):
