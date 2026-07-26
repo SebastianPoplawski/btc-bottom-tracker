@@ -35,7 +35,24 @@ LABELS: dict[str, str] = {
     "whale_accumulating": "Akumulacja wielorybów",
     "fear_greed": "Fear & Greed",
     "days_since_ath": "Czas od ATH",
+    # sell-side (krok 13+)
+    "pi_cycle_crossed": "Pi Cycle Top",
+    "months_since_halving": "Czas od halvingu",
+    # makro (osobny licznik risk-off, poza frameworkiem)
+    "fed_funds_delta_3m": "Fed: zmiana stopy (3M)",
+    "dxy_delta_3m": "Dolar: zmiana indeksu (3M)",
+    "m2_yoy": "Podaż M2 r/r",
+    "etf_flows_usd_7d": "ETF spot: przepływy 7d",
 }
+
+# Strony (side) configu: bottom = framework dna (jak dotąd), top = sygnały
+# szczytu cyklu, macro = osobny licznik risk-off (POZA frameworkiem Phila).
+# Brak/nieznana wartość w configu -> traktowana jak "bottom" (kompatybilność
+# wsteczna: istniejący arkusz bez kolumny `side` działa bez zmian).
+SIDE_BOTTOM = "bottom"
+SIDE_TOP = "top"
+SIDE_MACRO = "macro"
+VALID_SIDES = {SIDE_BOTTOM, SIDE_TOP, SIDE_MACRO}
 
 # Operatory configu (spójne z sheets.VALID_OPERATORS; is_false dodane defensywnie,
 # bo komentarz w ddl.sql je wymienia).
@@ -238,8 +255,31 @@ def _normalize_config(config: Any) -> list[dict]:
             "weight": _clean_num(rec.get("weight")) or 1.0,
             "active": _clean_bool(rec.get("active")),
             "description": (None if _is_missing(rec.get("description")) else str(rec.get("description"))),
+            "side": _clean_side(rec.get("side")),
         })
     return rows
+
+
+def _clean_side(v: Any) -> str:
+    """Normalizacja kolumny `side`; brak/nieznana wartość -> 'bottom' (wstecznie kompatybilne)."""
+    if _is_missing(v):
+        return SIDE_BOTTOM
+    s = str(v).strip().lower()
+    return s if s in VALID_SIDES else SIDE_BOTTOM
+
+
+def filter_side(config: Any, side: str = SIDE_BOTTOM) -> list[dict]:
+    """
+    Zwraca znormalizowane wiersze configu należące do danej strony (`side`).
+    Wynik nadaje się wprost do `evaluate` (list[dict] przechodzi przez
+    _normalize_config bez zmian semantyki).
+
+    Użycie w aplikacji:
+        bottom_cfg = composite.filter_side(cfg, composite.SIDE_BOTTOM)
+        result = composite.evaluate(bottom_cfg, reading, graded_fng=True)
+    """
+    want = _clean_side(side)
+    return [r for r in _normalize_config(config) if r["side"] == want]
 
 
 # --------------------------------------------------------------------------- #

@@ -93,6 +93,41 @@
       - **Bezpieczeństwo — klucz SA w DWÓCH miejscach:** ten sam klucz jest teraz w Streamlit Cloud
         (Secrets) **oraz** w GitHub Secrets. Podwójne przechowywanie podnosi wagę **zwężenia ról SA**
         (patrz dług techniczny C — teraz priorytetowe).
+- [x] **13 — Warstwa sprzedaży + makro: SCHEMAT DANYCH** — ZROBIONE (plan całości:
+      `PLAN_SELL_SIDE.md` w Projekcie Claude; kroki 14–18 = logika, ingestion FRED,
+      transze OUT, UI, docs):
+      - **Kolumna `side` w config_thresholds** (`bottom`/`top`/`macro`; puste/nieznane →
+        `bottom` — pełna kompatybilność wsteczna). Unikalność per (indicator, side) —
+        ten sam wskaźnik może mieć próg dna I szczytu. `composite.filter_side(config, side)`
+        + stałe `SIDE_BOTTOM/TOP/MACRO`; `evaluate` NIE zmieniony. app.py/app_dash.py
+        filtrują `side=bottom` (widok top/macro dojdzie w kroku 17).
+      - **Progi top (SKALIBROWANE pod malejące szczyty cykli, decyzja 2026-07-26):**
+        MVRV Z > 5, NUPL > 0.7, ratio ≥ 2.5, F&G > 75 (graded 75→90 w kroku 14),
+        `pi_cycle_crossed` is_true (computed w 14), `months_since_halving` between 12–18
+        (computed z `halving_date` w 14). Makro (OSOBNY licznik risk-off, POZA frameworkiem):
+        `fed_funds_delta_3m>0`, `dxy_delta_3m>0`, `m2_yoy<0`, `etf_flows_usd_7d<0`.
+      - **Nowe kolumny `indicator_readings`** (nullable): `ma_111d`, `ma_350d`, `halving_date`,
+        `fed_funds_rate`, `fed_funds_delta_3m`, `dxy_proxy`, `dxy_delta_3m`, `m2_yoy`,
+        `etf_flows_usd_7d`. Migracja SAMOczynna: `ensure_readings_table()` woła teraz
+        `ensure_schema_v13()` (`ALTER ... ADD COLUMN IF NOT EXISTS`) — cron nie wymaga
+        ręcznych kroków. `read_history`/`read_config_thresholds` mają fallback na schemat
+        sprzed v13 (deploy przed migracją NIE wywala live).
+      - **`sell_tranches`** (lustro DCA; `allocation_pct` = % POZYCJI, `min_top_signals`):
+        zakładka + external `sell_tranches_ext` (DDL), `sheets.read_sell` (tolerancyjne na
+        brak zakładki), `bigquery_client.read_sell_tranches` (pusty DF gdy brak tabeli),
+        `mock.sell_df`, seed z 5 pustymi transzami (progi wpisuje użytkownik — NIE zgadujemy).
+      - **Skrypty:** `scripts/migrate_13.py` (external DDL + kolumny; `--dry-run`);
+        `bootstrap_sheet.py` — nowa zakładka sell + **niedestrukcyjny upgrade v13**
+        (`upgrade_config_tab`: dokłada kolumnę `side` i wiersze top/macro NIE ruszając
+        ręcznych progów; `upgrade_readings_tab`: dokłada nagłówki nowych kolumn). Przy
+        okazji NAPRAWIONY rozjazd: bootstrap miał wagi mvrv/nupl 1.0 sprzed kroku 11 → 0.5.
+      - **Kolejność wdrożenia LIVE:** push → `python scripts/bootstrap_sheet.py` (arkusz) →
+        `python scripts/migrate_13.py` (external DDL). Do czasu migracji live działa po
+        staremu (fallbacki).
+      - Seed: `halving_date=2024-04-20` (fakt publiczny), `expected_top_count=0`,
+        `expected_macro_count=0`; `expected_composite_count=1` BEZ ZMIAN.
+        Testy: `tests/test_schema_v13.py` (17 testów) + zaktualizowany `test_backfill`.
+        **90 testów zielonych.**
 
 ---
 

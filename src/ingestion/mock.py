@@ -62,8 +62,9 @@ def latest_reading(seed: Optional[dict] = None) -> dict:
     rows = sorted(rows, key=lambda r: str(r.get("reading_date", "")))
     row = dict(rows[-1])
     row["reading_date"] = _parse_date(row.get("reading_date"))
-    if row.get("ath_date"):
-        row["ath_date"] = _parse_date(row.get("ath_date"))
+    for date_field in ("ath_date", "halving_date"):
+        if row.get(date_field):
+            row[date_field] = _parse_date(row.get(date_field))
     return row
 
 
@@ -84,6 +85,17 @@ def dca_df(seed: Optional[dict] = None):
     df = pd.DataFrame(seed.get("dca_tranches", []))
     if not df.empty and "trigger_price_usd" in df.columns:
         df = df.sort_values("trigger_price_usd", ascending=False).reset_index(drop=True)
+    return df
+
+
+def sell_df(seed: Optional[dict] = None):
+    """Plan transz SPRZEDAŻY (krok 13) — lustro dca_df; sortowanie rosnąco
+    (pierwsza transza wyjścia aktywuje się najniżej)."""
+    import pandas as pd
+    seed = seed or load_seed()
+    df = pd.DataFrame(seed.get("sell_tranches", []))
+    if not df.empty and "trigger_price_usd" in df.columns:
+        df = df.sort_values("trigger_price_usd", ascending=True, na_position="last").reset_index(drop=True)
     return df
 
 

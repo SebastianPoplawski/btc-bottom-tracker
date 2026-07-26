@@ -1,7 +1,17 @@
-indicator,operator,threshold_value,threshold_value2,weight,active,description
-mvrv_z_score,lt,0,,0.5,TRUE,Dno: MVRV Z < 0 (redundancja z NUPL -> waga 0.5)
-nupl,lt,0,,0.5,TRUE,Dno: NUPL < 0 (kapitulacja; redundancja z MVRV-Z -> waga 0.5)
-price_to_200w_ratio,lte,1.05,,1.0,TRUE,Dno: cena <= ~105% 200W MA
-whale_accumulating,is_true,,,1.0,TRUE,Dno: reczna flaga TRUE; ref. Exchange Whale Ratio 72h MA < 0.85
-fear_greed,lt,25,,0.5,TRUE,Dno: F&G < 25 = pasmo Extreme Fear alternative.me (0-24); niska waga
-days_since_ath,between,300,400,1.0,TRUE,Dno: ~10-13 mies. od ATH
+indicator,operator,threshold_value,threshold_value2,weight,active,description,side
+mvrv_z_score,lt,0,,0.5,TRUE,Dno: MVRV Z < 0 (redundancja z NUPL -> waga 0.5),bottom
+nupl,lt,0,,0.5,TRUE,Dno: NUPL < 0 (kapitulacja; redundancja z MVRV-Z -> waga 0.5),bottom
+price_to_200w_ratio,lte,1.05,,1.0,TRUE,Dno: cena <= ~105% 200W MA,bottom
+whale_accumulating,is_true,,,1.0,TRUE,Dno: reczna flaga TRUE; ref. Exchange Whale Ratio 72h MA < 0.85,bottom
+fear_greed,lt,25,,0.5,TRUE,Dno: F&G < 25 = pasmo Extreme Fear alternative.me (0-24); niska waga,bottom
+days_since_ath,between,300,400,1.0,TRUE,Dno: ~10-13 mies. od ATH,bottom
+mvrv_z_score,gt,5,,0.5,TRUE,Szczyt: MVRV Z > 5 (malejace szczyty cykli; redundancja z NUPL -> 0.5),top
+nupl,gt,0.7,,0.5,TRUE,Szczyt: NUPL > 0.7 (euforia; redundancja z MVRV-Z -> 0.5),top
+price_to_200w_ratio,gte,2.5,,1.0,TRUE,Szczyt: cena >= 2.5x 200W MA,top
+fear_greed,gt,75,,0.5,TRUE,Szczyt: F&G > 75 (Extreme Greed); wklad stopniowy 75->90; niska waga,top
+pi_cycle_crossed,is_true,,,1.0,TRUE,Szczyt: Pi Cycle Top - 111DMA >= 2x 350DMA (computed z ma_111d/ma_350d),top
+months_since_halving,between,12,18,1.0,TRUE,Szczyt: 12-18 mies. od halvingu (computed z halving_date),top
+fed_funds_delta_3m,gt,0,,1.0,TRUE,Risk-off: Fed zaciesnia (DFF wyzej niz ~3 mies. temu),macro
+dxy_delta_3m,gt,0,,1.0,TRUE,Risk-off: dolar umacnia sie (broad index wyzej niz ~3 mies. temu),macro
+m2_yoy,lt,0,,1.0,TRUE,Risk-off: podaz M2 kurczy sie r/r,macro
+etf_flows_usd_7d,lt,0,,1.0,TRUE,Risk-off: odplywy netto z ETF spot BTC (7d; wpis reczny),macro

@@ -151,7 +151,10 @@ def main() -> None:
     # --- Composite (cała logika w composite.evaluate) ---
     # graded_fng=True: F&G wnosi wkład STOPNIOWY do wyniku ważonego (headline gauge).
     # Wpływa tylko na weighted_met/weighted_ratio — count_met (twardy licznik) bez zmian.
-    result = composite.evaluate(data["config"], data["reading"], graded_fng=True)
+    # filter_side (krok 13): config ma teraz strony bottom/top/macro — ten widok
+    # liczy framework DNA; warstwę top/macro dokłada do UI krok 17.
+    bottom_config = composite.filter_side(data["config"], composite.SIDE_BOTTOM)
+    result = composite.evaluate(bottom_config, data["reading"], graded_fng=True)
 
     ui.composite_summary(result)
     st.divider()

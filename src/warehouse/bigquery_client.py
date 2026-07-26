@@ -47,8 +47,10 @@ LOCATION = os.getenv("BQ_LOCATION", "EU")  # EU / US / europe-central2
 TABLE_READINGS = "indicator_readings"
 CONFIG_TABLE = os.getenv("CONFIG_TABLE", "config_thresholds_ext")  # external (default); native: config_thresholds
 DCA_TABLE = os.getenv("DCA_TABLE", "dca_tranches_ext")             # external (default); native: dca_tranches
+SELL_TABLE = os.getenv("SELL_TABLE", "sell_tranches_ext")          # external (default); native: sell_tranches (krok 13)
 
 # Kolumny i ich typy BQ dla upsertu odczytu (bez reading_date — to klucz).
+# Krok 13: dochodzą ma_111d/ma_350d (Pi Cycle), halving_date oraz makro (FRED/ręczne).
 _READING_FIELDS: list[tuple[str, str]] = [
     ("price_usd", "NUMERIC"),
     ("mvrv_z_score", "NUMERIC"),
@@ -59,6 +61,15 @@ _READING_FIELDS: list[tuple[str, str]] = [
     ("fear_greed", "INT64"),
     ("days_since_ath", "INT64"),
     ("ath_date", "DATE"),
+    ("ma_111d", "NUMERIC"),           # 111-dniowa MA (Pi Cycle Top; AUTO)
+    ("ma_350d", "NUMERIC"),           # 350-dniowa MA (Pi Cycle Top: cross 111DMA vs 2x350DMA; AUTO)
+    ("halving_date", "DATE"),         # data ostatniego halvingu (ręczne, RAZ — jak ath_date)
+    ("fed_funds_rate", "NUMERIC"),    # makro: stopa Fed (FRED DFF; AUTO)
+    ("fed_funds_delta_3m", "NUMERIC"),# makro: zmiana stopy vs ~3 mies. wstecz (AUTO)
+    ("dxy_proxy", "NUMERIC"),         # makro: broad dollar index (FRED DTWEXBGS; AUTO)
+    ("dxy_delta_3m", "NUMERIC"),      # makro: zmiana indeksu dolara vs ~3 mies. wstecz (AUTO)
+    ("m2_yoy", "NUMERIC"),            # makro: dynamika M2 r/r w % (FRED M2SL; AUTO)
+    ("etf_flows_usd_7d", "NUMERIC"),  # makro: przepływy netto ETF spot 7d, USD (ręczne)
     ("notes", "STRING"),
 ]
 
@@ -67,10 +78,14 @@ _SELECTABLE = {
     "reading_date", "price_usd", "mvrv_z_score", "nupl", "ma_200w",
     "whale_accumulating", "whale_ratio", "fear_greed", "days_since_ath",
     "ath_date", "notes",
+    "ma_111d", "ma_350d", "halving_date",
+    "fed_funds_rate", "fed_funds_delta_3m", "dxy_proxy", "dxy_delta_3m",
+    "m2_yoy", "etf_flows_usd_7d",
 }
 _DEFAULT_COLS = [
     "reading_date", "price_usd", "mvrv_z_score", "nupl", "ma_200w",
     "whale_accumulating", "whale_ratio", "fear_greed", "days_since_ath",
+    "ma_111d", "ma_350d",
 ]
 
 
@@ -167,6 +182,15 @@ def ensure_readings_table() -> None:
       fear_greed      INT64     OPTIONS(description="Fear & Greed 0..100; dno gdy < 25 (pasmo Extreme Fear 0-24)"),
       days_since_ath  INT64     OPTIONS(description="Dni od ATH; dno ~300-400 (10-13 mies.)"),
       ath_date        DATE      OPTIONS(description="Data ATH (opcjonalnie, do przeliczeń)"),
+      ma_111d         NUMERIC   OPTIONS(description="111-dniowa MA ceny (Pi Cycle Top)"),
+      ma_350d         NUMERIC   OPTIONS(description="350-dniowa MA ceny (Pi Cycle Top: cross 111DMA vs 2x350DMA)"),
+      halving_date    DATE      OPTIONS(description="Data ostatniego halvingu (ręczne, RAZ — months_since_halving computed)"),
+      fed_funds_rate  NUMERIC   OPTIONS(description="Makro: stopa Fed, FRED DFF"),
+      fed_funds_delta_3m NUMERIC OPTIONS(description="Makro: zmiana stopy Fed vs ~3 mies. wstecz"),
+      dxy_proxy       NUMERIC   OPTIONS(description="Makro: broad dollar index, FRED DTWEXBGS"),
+      dxy_delta_3m    NUMERIC   OPTIONS(description="Makro: zmiana indeksu dolara vs ~3 mies. wstecz"),
+      m2_yoy          NUMERIC   OPTIONS(description="Makro: dynamika M2 r/r w %, FRED M2SL"),
+      etf_flows_usd_7d NUMERIC  OPTIONS(description="Makro: przepływy netto ETF spot BTC 7d, USD (ręczne)"),
       notes           STRING    OPTIONS(description="Notatka ręczna"),
       inserted_at     TIMESTAMP OPTIONS(description="Czas pierwszego zapisu wiersza"),
       updated_at      TIMESTAMP OPTIONS(description="Czas ostatniej modyfikacji")
@@ -174,7 +198,41 @@ def ensure_readings_table() -> None:
     OPTIONS(description="Dzienna historia surowych odczytów wskaźników dna BTC")
     """
     execute_sql(sql)
+    # Tabela mogła istnieć w schemacie sprzed kroku 13 (CREATE IF NOT EXISTS
+    # jej wtedy NIE zmienia) — dociągnij brakujące kolumny idempotentnie.
+    ensure_schema_v13()
     logger.info("Tabela %s gotowa.", TABLE_READINGS)
+
+
+# Kolumny dodane w kroku 13 (warstwa sprzedaży + makro) — pod idempotentny ALTER.
+_V13_COLUMNS: list[tuple[str, str]] = [
+    ("ma_111d", "NUMERIC"),
+    ("ma_350d", "NUMERIC"),
+    ("halving_date", "DATE"),
+    ("fed_funds_rate", "NUMERIC"),
+    ("fed_funds_delta_3m", "NUMERIC"),
+    ("dxy_proxy", "NUMERIC"),
+    ("dxy_delta_3m", "NUMERIC"),
+    ("m2_yoy", "NUMERIC"),
+    ("etf_flows_usd_7d", "NUMERIC"),
+]
+
+
+def ensure_schema_v13() -> None:
+    """Idempotentna migracja schematu (krok 13): dokłada nowe kolumny do
+    istniejącej tabeli `indicator_readings`.
+
+    `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` jest bezpieczne i tanie (metadane,
+    zero skanowania) — wołane przy każdym zapisie (ensure_readings_table), więc
+    świeże i stare środowiska same dochodzą do aktualnego schematu; cron
+    GitHub Actions nie wymaga ręcznej migracji.
+    """
+    table = f"`{PROJECT_ID}.{DATASET}.{TABLE_READINGS}`"
+    clauses = ",\n      ".join(
+        f"ADD COLUMN IF NOT EXISTS {name} {bq_type}" for name, bq_type in _V13_COLUMNS
+    )
+    execute_sql(f"ALTER TABLE {table}\n      {clauses}")
+    logger.info("Schemat v13 (%d kolumn) zapewniony.", len(_V13_COLUMNS))
 
 
 # ------------------------------------------------------------------
@@ -245,15 +303,15 @@ def read_history(days: int = 365, columns: Optional[list[str]] = None) -> pd.Dat
     col_sql = ", ".join(safe)
 
     cutoff = date.today() - timedelta(days=days)
-    sql = f"""
-    SELECT {col_sql}
-    FROM `{PROJECT_ID}.{DATASET}.{TABLE_READINGS}`
-    WHERE reading_date >= @cutoff
-    ORDER BY reading_date
-    """
-    try:
+
+    def _run(cols_sql: str) -> pd.DataFrame:
         job = client.query(
-            sql,
+            f"""
+            SELECT {cols_sql}
+            FROM `{PROJECT_ID}.{DATASET}.{TABLE_READINGS}`
+            WHERE reading_date >= @cutoff
+            ORDER BY reading_date
+            """,
             job_config=bigquery.QueryJobConfig(
                 query_parameters=[
                     bigquery.ScalarQueryParameter("cutoff", "DATE", cutoff)
@@ -261,7 +319,21 @@ def read_history(days: int = 365, columns: Optional[list[str]] = None) -> pd.Dat
             ),
         )
         return job.result().to_dataframe(create_bqstorage_client=False)
+
+    try:
+        return _run(col_sql)
     except GoogleAPIError as exc:
+        # Tabela sprzed migracji v13 (brak nowych kolumn) — spróbuj bez nich,
+        # zamiast wywalać wykresy. Zapis (ensure_readings_table) i tak domiga
+        # schemat przy najbliższym ingeście.
+        if "Unrecognized name" in str(exc):
+            legacy = [c for c in safe if c not in {n for n, _ in _V13_COLUMNS}]
+            logger.warning("read_history: schemat sprzed v13 — ponawiam bez nowych kolumn.")
+            try:
+                return _run(", ".join(legacy))
+            except GoogleAPIError as exc2:
+                logger.error("read_history nie powiódł się: %s", exc2)
+                raise
         logger.error("read_history nie powiódł się: %s", exc)
         raise
 
@@ -270,14 +342,51 @@ def read_history(days: int = 365, columns: Optional[list[str]] = None) -> pd.Dat
 # Odczyt konfiguracji i planu DCA (działa dla tabel natywnych I _ext)
 # ------------------------------------------------------------------
 def read_config_thresholds() -> pd.DataFrame:
-    """Progi sygnałów. Wejście do logiki sygnałów (oddzielny moduł)."""
+    """Progi sygnałów. Wejście do logiki sygnałów (oddzielny moduł).
+
+    Krok 13: dochodzi kolumna `side` (bottom/top/macro). Tabela external sprzed
+    migracji jej nie ma — wtedy fallback do starego SELECT-a i side='bottom'
+    (spójne z composite._clean_side)."""
+    client = get_client()
+    base = f"FROM `{PROJECT_ID}.{DATASET}.{CONFIG_TABLE}`"
+    try:
+        sql = f"""
+        SELECT indicator, operator, threshold_value, threshold_value2,
+               weight, active, description, side
+        {base}
+        """
+        return client.query(sql).result().to_dataframe(create_bqstorage_client=False)
+    except GoogleAPIError as exc:
+        if "Unrecognized name" not in str(exc):
+            raise
+        logger.warning("read_config_thresholds: brak kolumny side (schemat sprzed v13) — side='bottom'.")
+        sql = f"""
+        SELECT indicator, operator, threshold_value, threshold_value2,
+               weight, active, description
+        {base}
+        """
+        df = client.query(sql).result().to_dataframe(create_bqstorage_client=False)
+        df["side"] = "bottom"
+        return df
+
+
+def read_sell_tranches() -> pd.DataFrame:
+    """Plan transz SPRZEDAŻY (krok 13) — lustro read_dca_tranches.
+
+    Tolerancyjne na brak tabeli (`sell_tranches_ext` powstaje dopiero w migracji):
+    zwraca pusty DataFrame zamiast wyjątku, żeby UI degradował się łagodnie."""
     client = get_client()
     sql = f"""
-    SELECT indicator, operator, threshold_value, threshold_value2,
-           weight, active, description
-    FROM `{PROJECT_ID}.{DATASET}.{CONFIG_TABLE}`
+    SELECT tranche_id, trigger_price_usd, allocation_pct,
+           min_top_signals, status, executed_date, executed_price_usd, note
+    FROM `{PROJECT_ID}.{DATASET}.{SELL_TABLE}`
+    ORDER BY trigger_price_usd ASC
     """
-    return client.query(sql).result().to_dataframe(create_bqstorage_client=False)
+    try:
+        return client.query(sql).result().to_dataframe(create_bqstorage_client=False)
+    except GoogleAPIError as exc:
+        logger.warning("read_sell_tranches: %s — zwracam pusty plan (uruchom migrację/bootstrap).", exc)
+        return pd.DataFrame()
 
 
 def read_dca_tranches() -> pd.DataFrame:

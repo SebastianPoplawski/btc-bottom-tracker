@@ -2,11 +2,15 @@
   "_meta": {
     "snapshot_date": "2026-06-01",
     "app_mode": "demo",
-    "uwaga": "Seed do trybu demo (bez chmury). Wartości rynkowe NIE są zgadywane. Pola null uzupełnij: ręcznie (mvrv_z_score, nupl, days_since_ath, ath_date) lub z API w trybie live (price_usd, ma_200w). F&G i whale_accumulating pochodzą od użytkownika.",
+    "uwaga": "Seed do trybu demo (bez chmury). Wartości rynkowe NIE są zgadywane. Pola null uzupełnij: ręcznie (mvrv_z_score, nupl, days_since_ath, ath_date, etf_flows_usd_7d) lub z API w trybie live (price_usd, ma_200w, ma_111d, ma_350d, fear_greed, makro FRED). F&G i whale_accumulating pochodzą od użytkownika.",
     "config_source": "external_sheets (default) lub native — bez różnicy dla tego seeda",
     "expected_active_signals": ["fear_greed"],
     "expected_composite_count": 1,
-    "composite_note": "Wyliczone Z REGUŁY (F&G < 25 = pasmo Extreme Fear), nie pod fixture: 23 < 25 => F&G aktywny; whale_accumulating=false => nieaktywny; reszta null => nieaktywne/nieznane. Składowe pełne 6 sygnałów. Aktualizuj te pola, gdy zmienisz regułę lub odczyty (test_signals.py / demo nie mogą się rozjeżdżać z configiem)."
+    "expected_top_count": 0,
+    "expected_macro_count": 0,
+    "composite_note": "Wyliczone Z REGUŁY (F&G < 25 = pasmo Extreme Fear), nie pod fixture: 23 < 25 => F&G aktywny; whale_accumulating=false => nieaktywny; reszta null => nieaktywne/nieznane. Składowe pełne 6 sygnałów. Aktualizuj te pola, gdy zmienisz regułę lub odczyty (test_signals.py / demo nie mogą się rozjeżdżać z configiem).",
+    "top_note": "Side=top (krok 13): F&G 23 NIE > 75 => False; mvrv/nupl/ratio null; pi_cycle_crossed computed z ma_111d/ma_350d (null w seedzie); months_since_halving computed z halving_date (2024-04-20; przy snapshot 2026-06-01 ~25 mies. => poza oknem 12-18). Oczekiwany count_met=0.",
+    "macro_note": "Side=macro (osobny licznik risk-off, POZA frameworkiem): wszystkie odczyty makro null w seedzie => count_met=0, evaluable=0."
   },
 
   "indicator_readings": [
@@ -21,17 +25,38 @@
       "fear_greed": 23,
       "days_since_ath": null,
       "ath_date": null,
-      "notes": "Snapshot ref. Wieloryby zaczely redukowac -> whale_accumulating=FALSE. F&G ~23. Exchange Whale Ratio 72h MA orientacyjnie >0.85."
+      "ma_111d": null,
+      "ma_350d": null,
+      "halving_date": "2024-04-20",
+      "fed_funds_rate": null,
+      "fed_funds_delta_3m": null,
+      "dxy_proxy": null,
+      "dxy_delta_3m": null,
+      "m2_yoy": null,
+      "etf_flows_usd_7d": null,
+      "notes": "Snapshot ref. Wieloryby zaczely redukowac -> whale_accumulating=FALSE. F&G ~23. Exchange Whale Ratio 72h MA orientacyjnie >0.85. halving_date = fakt publiczny (2024-04-20)."
     }
   ],
 
   "config_thresholds": [
-    { "indicator": "mvrv_z_score",        "operator": "lt",      "threshold_value": 0,    "threshold_value2": null, "weight": 0.5, "active": true, "description": "Dno: MVRV Z < 0 (redundancja z NUPL -> waga 0.5)" },
-    { "indicator": "nupl",                "operator": "lt",      "threshold_value": 0,    "threshold_value2": null, "weight": 0.5, "active": true, "description": "Dno: NUPL < 0 (kapitulacja; redundancja z MVRV-Z -> waga 0.5)" },
-    { "indicator": "price_to_200w_ratio", "operator": "lte",     "threshold_value": 1.05, "threshold_value2": null, "weight": 1.0, "active": true, "description": "Dno: cena <= ~105% 200W MA" },
-    { "indicator": "whale_accumulating",  "operator": "is_true", "threshold_value": null, "threshold_value2": null, "weight": 1.0, "active": true, "description": "Dno: reczna flaga TRUE; ref. Exchange Whale Ratio 72h MA < 0.85" },
-    { "indicator": "fear_greed",          "operator": "lt",      "threshold_value": 25,   "threshold_value2": null, "weight": 0.5, "active": true, "description": "Dno: F&G < 25 = pasmo Extreme Fear alternative.me (0-24); niska waga" },
-    { "indicator": "days_since_ath",      "operator": "between", "threshold_value": 300,  "threshold_value2": 400,  "weight": 1.0, "active": true, "description": "Dno: ~10-13 mies. od ATH" }
+    { "indicator": "mvrv_z_score",        "operator": "lt",      "threshold_value": 0,    "threshold_value2": null, "weight": 0.5, "active": true, "description": "Dno: MVRV Z < 0 (redundancja z NUPL -> waga 0.5)", "side": "bottom" },
+    { "indicator": "nupl",                "operator": "lt",      "threshold_value": 0,    "threshold_value2": null, "weight": 0.5, "active": true, "description": "Dno: NUPL < 0 (kapitulacja; redundancja z MVRV-Z -> waga 0.5)", "side": "bottom" },
+    { "indicator": "price_to_200w_ratio", "operator": "lte",     "threshold_value": 1.05, "threshold_value2": null, "weight": 1.0, "active": true, "description": "Dno: cena <= ~105% 200W MA", "side": "bottom" },
+    { "indicator": "whale_accumulating",  "operator": "is_true", "threshold_value": null, "threshold_value2": null, "weight": 1.0, "active": true, "description": "Dno: reczna flaga TRUE; ref. Exchange Whale Ratio 72h MA < 0.85", "side": "bottom" },
+    { "indicator": "fear_greed",          "operator": "lt",      "threshold_value": 25,   "threshold_value2": null, "weight": 0.5, "active": true, "description": "Dno: F&G < 25 = pasmo Extreme Fear alternative.me (0-24); niska waga", "side": "bottom" },
+    { "indicator": "days_since_ath",      "operator": "between", "threshold_value": 300,  "threshold_value2": 400,  "weight": 1.0, "active": true, "description": "Dno: ~10-13 mies. od ATH", "side": "bottom" },
+
+    { "indicator": "mvrv_z_score",        "operator": "gt",      "threshold_value": 5,    "threshold_value2": null, "weight": 0.5, "active": true, "description": "Szczyt: MVRV Z > 5 (malejace szczyty cykli; redundancja z NUPL -> 0.5)", "side": "top" },
+    { "indicator": "nupl",                "operator": "gt",      "threshold_value": 0.7,  "threshold_value2": null, "weight": 0.5, "active": true, "description": "Szczyt: NUPL > 0.7 (euforia; redundancja z MVRV-Z -> 0.5)", "side": "top" },
+    { "indicator": "price_to_200w_ratio", "operator": "gte",     "threshold_value": 2.5,  "threshold_value2": null, "weight": 1.0, "active": true, "description": "Szczyt: cena >= 2.5x 200W MA", "side": "top" },
+    { "indicator": "fear_greed",          "operator": "gt",      "threshold_value": 75,   "threshold_value2": null, "weight": 0.5, "active": true, "description": "Szczyt: F&G > 75 (Extreme Greed); wklad stopniowy 75->90; niska waga", "side": "top" },
+    { "indicator": "pi_cycle_crossed",    "operator": "is_true", "threshold_value": null, "threshold_value2": null, "weight": 1.0, "active": true, "description": "Szczyt: Pi Cycle Top - 111DMA >= 2x 350DMA (computed z ma_111d/ma_350d)", "side": "top" },
+    { "indicator": "months_since_halving","operator": "between", "threshold_value": 12,   "threshold_value2": 18,   "weight": 1.0, "active": true, "description": "Szczyt: 12-18 mies. od halvingu (computed z halving_date)", "side": "top" },
+
+    { "indicator": "fed_funds_delta_3m",  "operator": "gt",      "threshold_value": 0,    "threshold_value2": null, "weight": 1.0, "active": true, "description": "Risk-off: Fed zaciesnia (DFF wyzej niz ~3 mies. temu)", "side": "macro" },
+    { "indicator": "dxy_delta_3m",        "operator": "gt",      "threshold_value": 0,    "threshold_value2": null, "weight": 1.0, "active": true, "description": "Risk-off: dolar umacnia sie (broad index wyzej niz ~3 mies. temu)", "side": "macro" },
+    { "indicator": "m2_yoy",              "operator": "lt",      "threshold_value": 0,    "threshold_value2": null, "weight": 1.0, "active": true, "description": "Risk-off: podaz M2 kurczy sie r/r", "side": "macro" },
+    { "indicator": "etf_flows_usd_7d",    "operator": "lt",      "threshold_value": 0,    "threshold_value2": null, "weight": 1.0, "active": true, "description": "Risk-off: odplywy netto z ETF spot BTC (7d; wpis reczny)", "side": "macro" }
   ],
 
   "dca_tranches": [
@@ -42,5 +67,13 @@
     { "tranche_id": 5, "trigger_price_usd": 60000, "allocation_usd": null, "allocation_pct": null, "min_signals_required": null, "status": "pending", "executed_date": null, "executed_price_usd": null, "note": "PRZYKLAD" },
     { "tranche_id": 6, "trigger_price_usd": 57500, "allocation_usd": null, "allocation_pct": null, "min_signals_required": null, "status": "pending", "executed_date": null, "executed_price_usd": null, "note": "PRZYKLAD" },
     { "tranche_id": 7, "trigger_price_usd": 55000, "allocation_usd": null, "allocation_pct": null, "min_signals_required": null, "status": "pending", "executed_date": null, "executed_price_usd": null, "note": "PRZYKLAD - dno docelowe" }
+  ],
+
+  "sell_tranches": [
+    { "tranche_id": 1, "trigger_price_usd": null, "allocation_pct": null, "min_top_signals": null, "status": "pending", "executed_date": null, "executed_price_usd": null, "note": "PRZYKLAD - uzupelnij progi cen i % pozycji (Twoj plan wyjscia; nie zgadujemy rynku)" },
+    { "tranche_id": 2, "trigger_price_usd": null, "allocation_pct": null, "min_top_signals": null, "status": "pending", "executed_date": null, "executed_price_usd": null, "note": "PRZYKLAD" },
+    { "tranche_id": 3, "trigger_price_usd": null, "allocation_pct": null, "min_top_signals": null, "status": "pending", "executed_date": null, "executed_price_usd": null, "note": "PRZYKLAD" },
+    { "tranche_id": 4, "trigger_price_usd": null, "allocation_pct": null, "min_top_signals": null, "status": "pending", "executed_date": null, "executed_price_usd": null, "note": "PRZYKLAD" },
+    { "tranche_id": 5, "trigger_price_usd": null, "allocation_pct": null, "min_top_signals": null, "status": "pending", "executed_date": null, "executed_price_usd": null, "note": "PRZYKLAD - ostatnia transza" }
   ]
 }

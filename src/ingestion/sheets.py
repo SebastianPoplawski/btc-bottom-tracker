@@ -45,19 +45,29 @@ STALE_AFTER_DAYS = 2
 TAB_READINGS = os.getenv("SHEET_TAB_READINGS", "indicator_readings")
 TAB_CONFIG = os.getenv("SHEET_TAB_CONFIG", "config_thresholds")
 TAB_DCA = os.getenv("SHEET_TAB_DCA", "dca_tranches")
+TAB_SELL = os.getenv("SHEET_TAB_SELL", "sell_tranches")  # krok 13 (warstwa sprzedaży)
 
 # Kolumny indicator_readings = pola upsertu z bigquery_warehouse + reading_date.
-READING_NUMERIC = ["price_usd", "mvrv_z_score", "nupl", "ma_200w", "whale_ratio"]
+# Krok 13 dokłada: ma_111d/ma_350d (Pi Cycle, AUTO), halving_date (ręczne, RAZ),
+# makro (FRED AUTO: fed_funds_*, dxy_*, m2_yoy; ręcznie: etf_flows_usd_7d).
+READING_NUMERIC = ["price_usd", "mvrv_z_score", "nupl", "ma_200w", "whale_ratio",
+                   "ma_111d", "ma_350d",
+                   "fed_funds_rate", "fed_funds_delta_3m",
+                   "dxy_proxy", "dxy_delta_3m", "m2_yoy", "etf_flows_usd_7d"]
 READING_INT = ["fear_greed", "days_since_ath"]
 READING_BOOL = ["whale_accumulating"]
-READING_DATE = ["reading_date", "ath_date"]
+READING_DATE = ["reading_date", "ath_date", "halving_date"]
 READING_STR = ["notes"]
 # Pola przekazywane do upsert_reading (bez reading_date, który jest kluczem).
 UPSERT_FIELDS = ["price_usd", "mvrv_z_score", "nupl", "ma_200w", "whale_accumulating",
-                 "whale_ratio", "fear_greed", "days_since_ath", "ath_date", "notes"]
+                 "whale_ratio", "fear_greed", "days_since_ath", "ath_date",
+                 "ma_111d", "ma_350d", "halving_date",
+                 "fed_funds_rate", "fed_funds_delta_3m",
+                 "dxy_proxy", "dxy_delta_3m", "m2_yoy", "etf_flows_usd_7d", "notes"]
 
 VALID_OPERATORS = {"lt", "lte", "gt", "gte", "eq", "is_true", "between"}
 VALID_DCA_STATUS = {"pending", "executed", "skipped"}
+VALID_SIDES = {"bottom", "top", "macro"}  # spójne z composite.VALID_SIDES
 
 
 # --------------------------------------------------------------------------- #
@@ -280,11 +290,24 @@ def read_config(book: "gspread.Spreadsheet") -> tuple[pd.DataFrame, ValidationRe
     df["active"] = df["active"].map(to_bool)
     df["operator"] = df["operator"].astype(str).str.strip().str.lower()
 
+    # Kolumna `side` (krok 13): opcjonalna — brak/puste/nieznane => 'bottom'
+    # (kompatybilność wsteczna z arkuszem sprzed warstwy sprzedaży).
+    if "side" in df.columns:
+        side = df["side"].astype("string").str.strip().str.lower()
+        unknown = side.dropna()[~side.dropna().isin(VALID_SIDES)].unique()
+        if len(unknown):
+            vr.warn(f"[{TAB_CONFIG}] nieznane side: {list(unknown)} -> traktuję jako 'bottom' "
+                    f"(dozwolone: {sorted(VALID_SIDES)}).")
+        df["side"] = side.where(side.isin(VALID_SIDES), "bottom").fillna("bottom")
+    else:
+        df["side"] = "bottom"
+
     bad_op = df.loc[~df["operator"].isin(VALID_OPERATORS), "operator"].dropna().unique()
     if len(bad_op):
         vr.error(f"[{TAB_CONFIG}] nieznane operatory: {list(bad_op)} (dozwolone: {sorted(VALID_OPERATORS)}).")
-    if df["indicator"].duplicated().any():
-        vr.error(f"[{TAB_CONFIG}] zduplikowane indicator.")
+    # Ten sam wskaźnik może mieć próg dna I szczytu — unikalność per (indicator, side).
+    if df.duplicated(subset=["indicator", "side"]).any():
+        vr.error(f"[{TAB_CONFIG}] zduplikowane (indicator, side).")
     # 'between' wymaga threshold_value2; 'is_true' nie wymaga threshold_value
     is_between = df["operator"] == "between"
     if "threshold_value2" in df.columns and (is_between & df["threshold_value2"].isna()).any():
@@ -325,6 +348,51 @@ def read_dca(book: "gspread.Spreadsheet") -> tuple[pd.DataFrame, ValidationResul
         if tot and abs(tot - 100) > 1:
             vr.warn(f"[{TAB_DCA}] suma allocation_pct = {tot:.1f}% (≠ 100%).")
     return df.sort_values("trigger_price_usd", ascending=False).reset_index(drop=True), vr
+
+
+def read_sell(book: "gspread.Spreadsheet") -> tuple[pd.DataFrame, ValidationResult]:
+    """Plan transz SPRZEDAŻY (krok 13) — lustro read_dca.
+
+    TOLERANCYJNE na brak zakładki: arkusze sprzed warstwy sprzedaży nie mają
+    `sell_tranches` — wtedy zwracamy pusty DataFrame + warning (NIE error),
+    żeby live nie wywalił się po deployu przed uruchomieniem bootstrap_sheet.
+    allocation_pct = % POZYCJI BTC do zdjęcia w transzy (nie USD).
+    """
+    vr = ValidationResult()
+    try:
+        df = read_tab(book, TAB_SELL)
+    except SheetsReadError:
+        vr.warn(f"[{TAB_SELL}] brak zakładki — plan transz sprzedaży nieaktywny "
+                "(uruchom scripts/bootstrap_sheet.py, by ją założyć).")
+        return pd.DataFrame(), vr
+    if df.empty:
+        vr.warn(f"[{TAB_SELL}] brak transz sprzedaży.")
+        return df, vr
+    _require(df, ["tranche_id", "trigger_price_usd", "status"], TAB_SELL, vr)
+    if not vr.ok:
+        return df, vr
+
+    df["tranche_id"] = df["tranche_id"].map(to_int)
+    for c in ("trigger_price_usd", "allocation_pct", "executed_price_usd"):
+        if c in df.columns:
+            df[c] = df[c].map(to_float)
+    if "min_top_signals" in df.columns:
+        df["min_top_signals"] = df["min_top_signals"].map(to_int)
+    if "executed_date" in df.columns:
+        df["executed_date"] = df["executed_date"].map(to_date)
+    df["status"] = df["status"].astype(str).str.strip().str.lower()
+
+    bad = df.loc[~df["status"].isin(VALID_DCA_STATUS), "status"].dropna().unique()
+    if len(bad):
+        vr.warn(f"[{TAB_SELL}] nieznane statusy: {list(bad)} (dozwolone: {sorted(VALID_DCA_STATUS)}).")
+    if df["tranche_id"].duplicated().any():
+        vr.error(f"[{TAB_SELL}] zduplikowane tranche_id.")
+    if "allocation_pct" in df.columns:
+        tot = df["allocation_pct"].dropna().sum()
+        if tot and tot > 100 + 1:
+            vr.warn(f"[{TAB_SELL}] suma allocation_pct = {tot:.1f}% (> 100% pozycji).")
+    # Transze sprzedaży rosnąco po cenie (pierwsza aktywuje się najniżej).
+    return df.sort_values("trigger_price_usd", ascending=True).reset_index(drop=True), vr
 
 
 # --------------------------------------------------------------------------- #
@@ -388,6 +456,7 @@ class SheetBundle:
     dca: pd.DataFrame
     freshness: Freshness
     validation: ValidationResult
+    sell: pd.DataFrame = field(default_factory=pd.DataFrame)  # krok 13 (na końcu — kompatybilność pozycyjna)
 
 
 def load_all(client: Optional["gspread.Client"] = None,
@@ -397,10 +466,11 @@ def load_all(client: Optional["gspread.Client"] = None,
     readings, vr1 = read_readings(book)
     config, vr2 = read_config(book)
     dca, vr3 = read_dca(book)
-    for vr in (vr1, vr2, vr3):
+    sell, vr4 = read_sell(book)
+    for vr in (vr1, vr2, vr3, vr4):
         agg.errors.extend(vr.errors)
         agg.warnings.extend(vr.warnings)
-    return SheetBundle(readings, config, dca, assess_freshness(readings, stale_after), agg)
+    return SheetBundle(readings, config, dca, assess_freshness(readings, stale_after), agg, sell)
 
 
 if __name__ == "__main__":  # python sheets_ingest.py

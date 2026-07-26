@@ -34,6 +34,16 @@ CREATE TABLE IF NOT EXISTS `btc-bottom-tracker-498120.btc_tracker.indicator_read
   fear_greed      INT64     OPTIONS(description="Fear & Greed 0..100; dno gdy < 25 (pasmo Extreme Fear 0-24)"),
   days_since_ath  INT64     OPTIONS(description="Dni od ATH; dno ~300-400 (10-13 mies.)"),
   ath_date        DATE      OPTIONS(description="Data ATH (opcjonalnie, do przeliczeń)"),
+  -- ---- krok 13: warstwa sprzedaży + makro (kolumny nullable) ----
+  ma_111d         NUMERIC   OPTIONS(description="111-dniowa MA ceny (Pi Cycle Top)"),
+  ma_350d         NUMERIC   OPTIONS(description="350-dniowa MA ceny (Pi Cycle: cross 111DMA vs 2x350DMA)"),
+  halving_date    DATE      OPTIONS(description="Data ostatniego halvingu (ręczne, RAZ; months_since_halving computed)"),
+  fed_funds_rate  NUMERIC   OPTIONS(description="Makro: stopa Fed (FRED DFF)"),
+  fed_funds_delta_3m NUMERIC OPTIONS(description="Makro: zmiana stopy Fed vs ~3 mies. wstecz"),
+  dxy_proxy       NUMERIC   OPTIONS(description="Makro: broad dollar index (FRED DTWEXBGS)"),
+  dxy_delta_3m    NUMERIC   OPTIONS(description="Makro: zmiana indeksu dolara vs ~3 mies. wstecz"),
+  m2_yoy          NUMERIC   OPTIONS(description="Makro: dynamika M2 r/r w % (FRED M2SL)"),
+  etf_flows_usd_7d NUMERIC  OPTIONS(description="Makro: przepływy netto ETF spot BTC 7d, USD (ręczne)"),
   notes           STRING    OPTIONS(description="Notatka ręczna"),
   inserted_at     TIMESTAMP OPTIONS(description="Czas pierwszego zapisu wiersza"),
   updated_at      TIMESTAMP OPTIONS(description="Czas ostatniej modyfikacji")
@@ -41,8 +51,23 @@ CREATE TABLE IF NOT EXISTS `btc-bottom-tracker-498120.btc_tracker.indicator_read
 -- PARTITION BY reading_date   -- patrz NOTATKA O PARTYCJONOWANIU niżej: przy tej skali ZBĘDNE
 OPTIONS(description="Dzienna historia surowych odczytów wskaźników dna BTC");
 
+-- MIGRACJA istniejącej tabeli do schematu v13 (idempotentna; wykonuje ją też
+-- automatycznie ensure_schema_v13() przy każdym zapisie run_ingest/backfill):
+-- ALTER TABLE `btc-bottom-tracker-498120.btc_tracker.indicator_readings`
+--   ADD COLUMN IF NOT EXISTS ma_111d NUMERIC,
+--   ADD COLUMN IF NOT EXISTS ma_350d NUMERIC,
+--   ADD COLUMN IF NOT EXISTS halving_date DATE,
+--   ADD COLUMN IF NOT EXISTS fed_funds_rate NUMERIC,
+--   ADD COLUMN IF NOT EXISTS fed_funds_delta_3m NUMERIC,
+--   ADD COLUMN IF NOT EXISTS dxy_proxy NUMERIC,
+--   ADD COLUMN IF NOT EXISTS dxy_delta_3m NUMERIC,
+--   ADD COLUMN IF NOT EXISTS m2_yoy NUMERIC,
+--   ADD COLUMN IF NOT EXISTS etf_flows_usd_7d NUMERIC;
+
 -- price_to_200w_ratio celowo NIE jest składowane — liczymy je przy
 -- odczycie (price_usd / ma_200w), żeby nie trzymać danych pochodnych.
+-- Analogicznie pi_cycle_crossed (ma_111d vs 2*ma_350d) i months_since_halving
+-- (reading_date - halving_date) są COMPUTED w logice (krok 14), nie kolumnami.
 
 -- ------------------------------------------------------------
 -- 2) dca_tranches  (plan zakupów transzami $70K -> $55K)
@@ -68,15 +93,16 @@ OPTIONS(description="Plan DCA i status realizacji transz");
 --    kandydat na tabelę zewnętrzną (Sheets).
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `btc-bottom-tracker-498120.btc_tracker.config_thresholds` (
-  indicator        STRING  NOT NULL OPTIONS(description="Klucz: mvrv_z_score|nupl|price_to_200w_ratio|whale_accumulating|fear_greed|days_since_ath"),
+  indicator        STRING  NOT NULL OPTIONS(description="Klucz wskaźnika (kolumna readings albo computed); unikalny per (indicator, side)"),
   operator         STRING  OPTIONS(description="lt | gt | lte | gte | between | is_true | is_false"),
   threshold_value  NUMERIC OPTIONS(description="Próg główny"),
   threshold_value2 NUMERIC OPTIONS(description="Drugi próg dla 'between'"),
   weight           NUMERIC OPTIONS(description="Waga w composite (domyślnie 1.0; composite ważony liczy krok 03)"),
-  active           BOOL    OPTIONS(description="Czy wliczać do composite 'okno zakupu'"),
-  description      STRING
+  active           BOOL    OPTIONS(description="Czy wliczać do composite"),
+  description      STRING,
+  side             STRING  OPTIONS(description="bottom (dno, domyślne) | top (szczyt) | macro (risk-off, poza frameworkiem)")
 )
-OPTIONS(description="Edytowalne progi: definicja kiedy wskaźnik potwierdza dno");
+OPTIONS(description="Edytowalne progi: definicja kiedy wskaźnik potwierdza dno/szczyt/risk-off");
 
 -- Seed progów (uruchom raz; dostosuj do uznania).
 -- whale: sygnałem dna jest RĘCZNA flaga boolean whale_accumulating (operator is_true).
@@ -88,13 +114,27 @@ OPTIONS(description="Edytowalne progi: definicja kiedy wskaźnik potwierdza dno"
 --   TODO krok 03: zdjąć binarność F&G (wkład stopniowy: 0 dla >25, częściowy 10-24,
 --   pełny dla <10); rozważyć to samo dla pozostałych progów binarnych.
 INSERT INTO `btc-bottom-tracker-498120.btc_tracker.config_thresholds`
-(indicator, operator, threshold_value, threshold_value2, weight, active, description) VALUES
-('mvrv_z_score',        'lt',       0,    NULL, 0.5, TRUE, 'Dno: MVRV Z < 0 (redundancja z NUPL -> waga 0.5)'),
-('nupl',                'lt',       0,    NULL, 0.5, TRUE, 'Dno: NUPL < 0 (kapitulacja; redundancja z MVRV-Z -> waga 0.5)'),
-('price_to_200w_ratio', 'lte',      1.05, NULL, 1.0, TRUE, 'Dno: cena <= ~105% 200W MA'),
-('whale_accumulating',  'is_true',  NULL, NULL, 1.0, TRUE, 'Dno: reczna flaga TRUE; ref. Exchange Whale Ratio 72h MA < 0.85'),
-('fear_greed',          'lt',       25,   NULL, 0.5, TRUE, 'Dno: F&G < 25 = pasmo Extreme Fear alternative.me (0-24); niska waga'),
-('days_since_ath',      'between',  300,  400,  1.0, TRUE, 'Dno: ~10-13 mies. od ATH');
+(indicator, operator, threshold_value, threshold_value2, weight, active, description, side) VALUES
+('mvrv_z_score',        'lt',       0,    NULL, 0.5, TRUE, 'Dno: MVRV Z < 0 (redundancja z NUPL -> waga 0.5)', 'bottom'),
+('nupl',                'lt',       0,    NULL, 0.5, TRUE, 'Dno: NUPL < 0 (kapitulacja; redundancja z MVRV-Z -> waga 0.5)', 'bottom'),
+('price_to_200w_ratio', 'lte',      1.05, NULL, 1.0, TRUE, 'Dno: cena <= ~105% 200W MA', 'bottom'),
+('whale_accumulating',  'is_true',  NULL, NULL, 1.0, TRUE, 'Dno: reczna flaga TRUE; ref. Exchange Whale Ratio 72h MA < 0.85', 'bottom'),
+('fear_greed',          'lt',       25,   NULL, 0.5, TRUE, 'Dno: F&G < 25 = pasmo Extreme Fear alternative.me (0-24); niska waga', 'bottom'),
+('days_since_ath',      'between',  300,  400,  1.0, TRUE, 'Dno: ~10-13 mies. od ATH', 'bottom'),
+-- ---- krok 13: sygnały SZCZYTU (side=top). Progi SKALIBROWANE pod malejące
+-- szczyty cykli (2021: MVRV Z ledwo ~7 w lutym, ~3.5-4 w listopadzie) — nie pod
+-- historyczne ekstrema. Kalibruj po odczytach szczytu bieżącego cyklu. ----
+('mvrv_z_score',        'gt',       5,    NULL, 0.5, TRUE, 'Szczyt: MVRV Z > 5 (malejace szczyty cykli; redundancja z NUPL -> 0.5)', 'top'),
+('nupl',                'gt',       0.7,  NULL, 0.5, TRUE, 'Szczyt: NUPL > 0.7 (euforia; redundancja z MVRV-Z -> 0.5)', 'top'),
+('price_to_200w_ratio', 'gte',      2.5,  NULL, 1.0, TRUE, 'Szczyt: cena >= 2.5x 200W MA', 'top'),
+('fear_greed',          'gt',       75,   NULL, 0.5, TRUE, 'Szczyt: F&G > 75 (Extreme Greed); wklad stopniowy 75->90; niska waga', 'top'),
+('pi_cycle_crossed',    'is_true',  NULL, NULL, 1.0, TRUE, 'Szczyt: Pi Cycle Top — 111DMA >= 2x 350DMA (computed z ma_111d/ma_350d)', 'top'),
+('months_since_halving','between',  12,   18,   1.0, TRUE, 'Szczyt: 12-18 mies. od halvingu (computed z halving_date)', 'top'),
+-- ---- krok 13: MAKRO risk-off (side=macro) — osobny licznik, POZA frameworkiem ----
+('fed_funds_delta_3m',  'gt',       0,    NULL, 1.0, TRUE, 'Risk-off: Fed zaciesnia (DFF wyzej niz ~3 mies. temu)', 'macro'),
+('dxy_delta_3m',        'gt',       0,    NULL, 1.0, TRUE, 'Risk-off: dolar umacnia sie (broad index wyzej niz ~3 mies. temu)', 'macro'),
+('m2_yoy',              'lt',       0,    NULL, 1.0, TRUE, 'Risk-off: podaz M2 kurczy sie r/r', 'macro'),
+('etf_flows_usd_7d',    'lt',       0,    NULL, 1.0, TRUE, 'Risk-off: odplywy netto z ETF spot BTC (7d; wpis reczny)', 'macro');
 
 -- ============================================================
 -- WARIANT: config_thresholds / dca_tranches jako TABELE ZEWNĘTRZNE
@@ -113,6 +153,10 @@ INSERT INTO `btc-bottom-tracker-498120.btc_tracker.config_thresholds`
 --   MERGE jako target, partycji, klastrowania; każdy SELECT
 --   re-czyta arkusz (lekka latencja).
 -- ============================================================
+-- UWAGA (migracja v13): kolumna `side` w kolumnie H arkusza. Przed odpaleniem
+-- tego CREATE OR REPLACE zaktualizuj zakładkę (scripts/bootstrap_sheet.py z
+-- BTT_BOOTSTRAP_FORCE=1 albo dopisz kolumnę/wiersze ręcznie). Kod aplikacji ma
+-- fallback: stara tabela bez `side` czytana jest jako side='bottom'.
 CREATE OR REPLACE EXTERNAL TABLE `btc-bottom-tracker-498120.btc_tracker.config_thresholds_ext`
 (
   indicator        STRING,
@@ -121,12 +165,13 @@ CREATE OR REPLACE EXTERNAL TABLE `btc-bottom-tracker-498120.btc_tracker.config_t
   threshold_value2 NUMERIC,
   weight           NUMERIC,
   active           BOOL,
-  description      STRING
+  description      STRING,
+  side             STRING
 )
 OPTIONS (
   format            = 'GOOGLE_SHEETS',
   uris              = ['https://docs.google.com/spreadsheets/d/19GCtFyNBKBEj3-jWOLYfNBEd-7jVIXigkDJBGW0vHRY/edit'],
-  sheet_range       = 'config_thresholds!A1:G100',
+  sheet_range       = 'config_thresholds!A1:H100',
   skip_leading_rows = 1
 );
 
@@ -146,6 +191,42 @@ OPTIONS (
   format            = 'GOOGLE_SHEETS',
   uris              = ['https://docs.google.com/spreadsheets/d/19GCtFyNBKBEj3-jWOLYfNBEd-7jVIXigkDJBGW0vHRY/edit'],
   sheet_range       = 'dca_tranches!A1:I200',
+  skip_leading_rows = 1
+);
+
+-- ------------------------------------------------------------
+-- krok 13: sell_tranches — plan transz SPRZEDAŻY (lustro dca_tranches).
+-- allocation_pct = % POZYCJI BTC do zdjęcia w transzy (nie USD).
+-- min_top_signals = min. liczba sygnałów SZCZYTU (side=top), by transza
+-- była "gotowa" wg frameworka. Progi cen wpisuje użytkownik.
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `btc-bottom-tracker-498120.btc_tracker.sell_tranches` (
+  tranche_id         INT64   NOT NULL OPTIONS(description="Numer transzy sprzedaży"),
+  trigger_price_usd  NUMERIC OPTIONS(description="Cena BTC wyzwalająca transzę (od najniższej)"),
+  allocation_pct     NUMERIC OPTIONS(description="Udział pozycji BTC do zdjęcia (%)"),
+  min_top_signals    INT64   OPTIONS(description="Min. liczba sygnałów szczytu, by transza była gotowa (opcjonalne)"),
+  status             STRING  OPTIONS(description="pending | executed | skipped"),
+  executed_date      DATE    OPTIONS(description="Data realizacji"),
+  executed_price_usd NUMERIC OPTIONS(description="Faktyczna cena realizacji"),
+  note               STRING
+)
+OPTIONS(description="Plan transz sprzedaży i status realizacji");
+
+CREATE OR REPLACE EXTERNAL TABLE `btc-bottom-tracker-498120.btc_tracker.sell_tranches_ext`
+(
+  tranche_id         INT64,
+  trigger_price_usd  NUMERIC,
+  allocation_pct     NUMERIC,
+  min_top_signals    INT64,
+  status             STRING,
+  executed_date      DATE,
+  executed_price_usd NUMERIC,
+  note               STRING
+)
+OPTIONS (
+  format            = 'GOOGLE_SHEETS',
+  uris              = ['https://docs.google.com/spreadsheets/d/19GCtFyNBKBEj3-jWOLYfNBEd-7jVIXigkDJBGW0vHRY/edit'],
+  sheet_range       = 'sell_tranches!A1:H200',
   skip_leading_rows = 1
 );
 

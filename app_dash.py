@@ -362,7 +362,9 @@ def _warnings_block(warns):
 # --------------------------------------------------------------------------- #
 def build_content(data: dict, price_value) -> list:
     # graded_fng=True: stopniowy wkład F&G do wyniku ważonego (count_met bez zmian).
-    result = composite.evaluate(data["config"], data["reading"], graded_fng=True)
+    # filter_side (krok 13): ten widok liczy framework DNA (side=bottom).
+    bottom_config = composite.filter_side(data["config"], composite.SIDE_BOTTOM)
+    result = composite.evaluate(bottom_config, data["reading"], graded_fng=True)
 
     cp = None
     if price_value not in (None, ""):

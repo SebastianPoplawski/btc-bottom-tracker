@@ -55,6 +55,7 @@ SHEET_ID = os.getenv("GOOGLE_SHEET_ID", DEFAULT_SHEET_ID)
 # Nazwy zakładek = domyślne z sheets.py (override tymi samymi zmiennymi env).
 TAB_CONFIG = os.getenv("SHEET_TAB_CONFIG", "config_thresholds")
 TAB_DCA = os.getenv("SHEET_TAB_DCA", "dca_tranches")
+TAB_SELL = os.getenv("SHEET_TAB_SELL", "sell_tranches")  # krok 13
 TAB_READINGS = os.getenv("SHEET_TAB_READINGS", "indicator_readings")
 
 FORCE = os.getenv("BTT_BOOTSTRAP_FORCE", "").strip() == "1"
@@ -64,15 +65,39 @@ FORCE = os.getenv("BTT_BOOTSTRAP_FORCE", "").strip() == "1"
 # Dane startowe (1:1 z data/*.csv i docs/SHEETS_LAYOUT.md). Wartości jako STRING,
 # wpisywane RAW — Sheets nie reinterpretuje ich wg locale (kropka zostaje kropką).
 # --------------------------------------------------------------------------- #
+# Wiersze 1:1 z data/sheets_tab_config_thresholds.csv (zrodlo prawdy).
+# Krok 13: kolumna `side` (bottom/top/macro) + progi szczytu i makro.
+# Wagi mvrv/nupl = 0.5 (redundancja, krok 11).
 CONFIG_HEADER = ["indicator", "operator", "threshold_value", "threshold_value2",
-                 "weight", "active", "description"]
+                 "weight", "active", "description", "side"]
 CONFIG_ROWS = [
-    ["mvrv_z_score",        "lt",      "0",    "",  "1.0", "TRUE", "Dno: MVRV Z < 0"],
-    ["nupl",                "lt",      "0",    "",  "1.0", "TRUE", "Dno: NUPL < 0 (kapitulacja)"],
-    ["price_to_200w_ratio", "lte",     "1.05", "",  "1.0", "TRUE", "Dno: cena <= ~105% 200W MA"],
-    ["whale_accumulating",  "is_true", "",     "",  "1.0", "TRUE", "Dno: reczna flaga TRUE; ref. Exchange Whale Ratio 72h MA < 0.85"],
-    ["fear_greed",          "lt",      "25",   "",  "0.5", "TRUE", "Dno: F&G < 25 = pasmo Extreme Fear alternative.me (0-24); niska waga"],
-    ["days_since_ath",      "between", "300",  "400", "1.0", "TRUE", "Dno: ~10-13 mies. od ATH"],
+    ["mvrv_z_score",        "lt",      "0",    "",    "0.5", "TRUE", "Dno: MVRV Z < 0 (redundancja z NUPL -> waga 0.5)", "bottom"],
+    ["nupl",                "lt",      "0",    "",    "0.5", "TRUE", "Dno: NUPL < 0 (kapitulacja; redundancja z MVRV-Z -> waga 0.5)", "bottom"],
+    ["price_to_200w_ratio", "lte",     "1.05", "",    "1.0", "TRUE", "Dno: cena <= ~105% 200W MA", "bottom"],
+    ["whale_accumulating",  "is_true", "",     "",    "1.0", "TRUE", "Dno: reczna flaga TRUE; ref. Exchange Whale Ratio 72h MA < 0.85", "bottom"],
+    ["fear_greed",          "lt",      "25",   "",    "0.5", "TRUE", "Dno: F&G < 25 = pasmo Extreme Fear alternative.me (0-24); niska waga", "bottom"],
+    ["days_since_ath",      "between", "300",  "400", "1.0", "TRUE", "Dno: ~10-13 mies. od ATH", "bottom"],
+    ["mvrv_z_score",        "gt",      "5",    "",    "0.5", "TRUE", "Szczyt: MVRV Z > 5 (malejace szczyty cykli; redundancja z NUPL -> 0.5)", "top"],
+    ["nupl",                "gt",      "0.7",  "",    "0.5", "TRUE", "Szczyt: NUPL > 0.7 (euforia; redundancja z MVRV-Z -> 0.5)", "top"],
+    ["price_to_200w_ratio", "gte",     "2.5",  "",    "1.0", "TRUE", "Szczyt: cena >= 2.5x 200W MA", "top"],
+    ["fear_greed",          "gt",      "75",   "",    "0.5", "TRUE", "Szczyt: F&G > 75 (Extreme Greed); wklad stopniowy 75->90; niska waga", "top"],
+    ["pi_cycle_crossed",    "is_true", "",     "",    "1.0", "TRUE", "Szczyt: Pi Cycle Top - 111DMA >= 2x 350DMA (computed)", "top"],
+    ["months_since_halving","between", "12",   "18",  "1.0", "TRUE", "Szczyt: 12-18 mies. od halvingu (computed z halving_date)", "top"],
+    ["fed_funds_delta_3m",  "gt",      "0",    "",    "1.0", "TRUE", "Risk-off: Fed zaciesnia (DFF wyzej niz ~3 mies. temu)", "macro"],
+    ["dxy_delta_3m",        "gt",      "0",    "",    "1.0", "TRUE", "Risk-off: dolar umacnia sie (broad index wyzej niz ~3 mies. temu)", "macro"],
+    ["m2_yoy",              "lt",      "0",    "",    "1.0", "TRUE", "Risk-off: podaz M2 kurczy sie r/r", "macro"],
+    ["etf_flows_usd_7d",    "lt",      "0",    "",    "1.0", "TRUE", "Risk-off: odplywy netto z ETF spot BTC (7d; wpis reczny)", "macro"],
+]
+
+SELL_HEADER = ["tranche_id", "trigger_price_usd", "allocation_pct", "min_top_signals",
+               "status", "executed_date", "executed_price_usd", "note"]
+# Progi cen wyjscia to TWOJ plan — nie zgadujemy rynku; wiersze przykladowe puste.
+SELL_ROWS = [
+    ["1", "", "", "", "pending", "", "", "PRZYKLAD - uzupelnij progi cen i % pozycji (plan wyjscia)"],
+    ["2", "", "", "", "pending", "", "", "PRZYKLAD"],
+    ["3", "", "", "", "pending", "", "", "PRZYKLAD"],
+    ["4", "", "", "", "pending", "", "", "PRZYKLAD"],
+    ["5", "", "", "", "pending", "", "", "PRZYKLAD - ostatnia transza"],
 ]
 
 DCA_HEADER = ["tranche_id", "trigger_price_usd", "allocation_usd", "allocation_pct",
@@ -87,14 +112,20 @@ DCA_ROWS = [
     ["7", "55000", "", "", "", "pending", "", "", "PRZYKLAD - dno docelowe"],
 ]
 
+# Krok 13: dochodza kolumny Pi Cycle (ma_111d/ma_350d, AUTO), halving_date
+# (reczne, RAZ) i makro (FRED AUTO; etf_flows_usd_7d recznie).
 READINGS_HEADER = ["reading_date", "price_usd", "mvrv_z_score", "nupl", "ma_200w",
                    "whale_accumulating", "whale_ratio", "fear_greed", "days_since_ath",
-                   "ath_date", "notes"]
+                   "ath_date", "ma_111d", "ma_350d", "halving_date",
+                   "fed_funds_rate", "fed_funds_delta_3m", "dxy_proxy", "dxy_delta_3m",
+                   "m2_yoy", "etf_flows_usd_7d", "notes"]
 # Jeden wiersz przykładowy (snapshot ref. 1.06) — POKAZUJE FORMAT. Edytuj/zastąp aktualnym.
-# price_usd / ma_200w / fear_greed i tak dociąga API w trybie live; wpisujesz głównie
-# mvrv_z_score, nupl, whale_accumulating, ath_date.
+# price_usd / ma_200w / ma_111d / ma_350d / fear_greed / makro FRED dociąga API w trybie
+# live; wpisujesz głównie mvrv_z_score, nupl, whale_accumulating, ath_date, halving_date,
+# etf_flows_usd_7d.
 READINGS_ROWS = [
     ["2026-06-01", "", "", "", "", "FALSE", "0.90", "23", "", "",
+     "", "", "2024-04-20", "", "", "", "", "", "",
      "PRZYKLAD - edytuj lub dodaj nowy wiersz z dzisiejsza data (YYYY-MM-DD)"],
 ]
 
@@ -160,6 +191,83 @@ def ensure_tab(book: "gspread.Spreadsheet", title: str,
     return f"{verb} '{title}' ({len(rows)} wierszy danych + naglowek)."
 
 
+# --------------------------------------------------------------------------- #
+# Upgrade v13 (NIEDESTRUKCYJNY): dopisuje braki do ISTNIEJĄCYCH zakładek,
+# nie ruszając wartości wpisanych ręcznie (progi/wagi/odczyty zostają).
+# --------------------------------------------------------------------------- #
+def _col_letter(n: int) -> str:
+    """1 -> A, 2 -> B, ... 27 -> AA."""
+    out = ""
+    while n > 0:
+        n, rem = divmod(n - 1, 26)
+        out = chr(65 + rem) + out
+    return out
+
+
+def upgrade_config_tab(book: "gspread.Spreadsheet") -> str:
+    """Dokłada kolumnę `side` (istniejące wiersze -> 'bottom') i brakujące
+    wiersze top/macro do istniejącej zakładki config. Idempotentne."""
+    try:
+        ws = book.worksheet(TAB_CONFIG)
+    except gspread.WorksheetNotFound:
+        return f"UPGRADE '{TAB_CONFIG}': brak zakładki (utworzy ją ensure_tab)."
+    values = ws.get_all_values()
+    if _is_empty(values):
+        return f"UPGRADE '{TAB_CONFIG}': pusta (wypełni ją ensure_tab)."
+
+    header = [h.strip() for h in values[0]]
+    changes: list[str] = []
+
+    # 1) kolumna side
+    if "side" not in header:
+        col = len(header) + 1
+        letter = _col_letter(col)
+        n_data = len([r for r in values[1:] if any(str(c).strip() for c in r)])
+        col_values = [["side"]] + [["bottom"]] * n_data
+        if ws.col_count < col:
+            ws.add_cols(col - ws.col_count)
+        ws.update(range_name=f"{letter}1", values=col_values, value_input_option="RAW")
+        header.append("side")
+        changes.append(f"dodano kolumnę side ({letter}); istniejące wiersze -> bottom")
+
+    # 2) brakujące wiersze top/macro (klucz: indicator+side)
+    idx_ind = header.index("indicator")
+    idx_side = header.index("side")
+    existing = set()
+    for r in values[1:]:
+        if len(r) > idx_ind and str(r[idx_ind]).strip():
+            side = r[idx_side].strip().lower() if len(r) > idx_side and str(r[idx_side]).strip() else "bottom"
+            existing.add((str(r[idx_ind]).strip(), side))
+    to_add = [row for row in CONFIG_ROWS if (row[0], row[-1]) not in existing]
+    if to_add:
+        ws.append_rows(to_add, value_input_option="RAW")
+        changes.append(f"dopisano {len(to_add)} wierszy (top/macro)")
+
+    return (f"UPGRADE '{TAB_CONFIG}': " + "; ".join(changes)) if changes \
+        else f"UPGRADE '{TAB_CONFIG}': aktualna (side + wiersze top/macro już są)."
+
+
+def upgrade_readings_tab(book: "gspread.Spreadsheet") -> str:
+    """Dokłada brakujące NAGŁÓWKI nowych kolumn (v13) na końcu wiersza 1.
+    Danych nie rusza. Idempotentne."""
+    try:
+        ws = book.worksheet(TAB_READINGS)
+    except gspread.WorksheetNotFound:
+        return f"UPGRADE '{TAB_READINGS}': brak zakładki (utworzy ją ensure_tab)."
+    values = ws.get_all_values()
+    if _is_empty(values):
+        return f"UPGRADE '{TAB_READINGS}': pusta (wypełni ją ensure_tab)."
+    header = [h.strip() for h in values[0]]
+    missing = [c for c in READINGS_HEADER if c not in header]
+    if not missing:
+        return f"UPGRADE '{TAB_READINGS}': nagłówki aktualne."
+    start = len(header) + 1
+    if ws.col_count < len(header) + len(missing):
+        ws.add_cols(len(header) + len(missing) - ws.col_count)
+    ws.update(range_name=f"{_col_letter(start)}1", values=[missing], value_input_option="RAW")
+    return f"UPGRADE '{TAB_READINGS}': dodano nagłówki: {', '.join(missing)}."
+
+
 def main() -> None:
     # Windows konsola domyslnie cp1252 — wymus UTF-8, by polskie znaki w printach
     # nie wywalaly skryptu. try/except: reconfigure nie istnieje w starszych srodowiskach.
@@ -183,7 +291,11 @@ def main() -> None:
     results = [
         ensure_tab(book, TAB_CONFIG, CONFIG_HEADER, CONFIG_ROWS),
         ensure_tab(book, TAB_DCA, DCA_HEADER, DCA_ROWS),
+        ensure_tab(book, TAB_SELL, SELL_HEADER, SELL_ROWS),        # krok 13
         ensure_tab(book, TAB_READINGS, READINGS_HEADER, READINGS_ROWS),
+        # Upgrade v13 (niedestrukcyjny) dla zakładek, które już miały dane:
+        upgrade_config_tab(book),
+        upgrade_readings_tab(book),
     ]
     for r in results:
         print("  -", r)

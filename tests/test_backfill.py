@@ -34,6 +34,9 @@ _READING_COLUMNS = [
     "reading_date", "price_usd", "mvrv_z_score", "nupl", "ma_200w",
     "whale_accumulating", "whale_ratio", "fear_greed", "days_since_ath",
     "ath_date", "notes", "inserted_at", "updated_at",
+    # v13 (krok 13): warstwa sprzedaży + makro
+    "ma_111d", "ma_350d", "halving_date", "fed_funds_rate", "fed_funds_delta_3m",
+    "dxy_proxy", "dxy_delta_3m", "m2_yoy", "etf_flows_usd_7d",
 ]
 
 
@@ -44,7 +47,8 @@ def test_ensure_readings_table_emits_create_if_not_exists(monkeypatch):
 
     bq.ensure_readings_table()
 
-    assert len(captured) == 1
+    # v13: CREATE IF NOT EXISTS + idempotentny ALTER (migracja starych tabel).
+    assert len(captured) == 2
     sql = captured[0]
     assert "CREATE TABLE IF NOT EXISTS" in sql
     assert bq.TABLE_READINGS in sql  # indicator_readings
@@ -53,6 +57,11 @@ def test_ensure_readings_table_emits_create_if_not_exists(monkeypatch):
         assert col in sql, f"brak kolumny '{col}' w DDL"
     # inserted_at/updated_at jako TIMESTAMP (1:1 z ddl.sql)
     assert "TIMESTAMP" in sql
+
+    alter = captured[1]
+    assert "ALTER TABLE" in alter
+    for name, _type in bq._V13_COLUMNS:
+        assert f"ADD COLUMN IF NOT EXISTS {name}" in alter
 
 
 # --------------------------------------------------------------------------- #
