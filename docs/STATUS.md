@@ -172,6 +172,18 @@
         realny fetch zweryfikować lokalnie: `BTT_DRY_RUN=1 python src/ingestion/run_ingest.py`.
       - Testy: `tests/test_fred.py` (11) + rozszerzony `test_price.py` (4 nowe).
         **123 testy zielone.**
+- [x] **16 — Warstwa sprzedaży: `exit_plan.py` (transze OUT)** — ZROBIONE:
+      - **NOWY `src/logic/exit_plan.py`** — CZYSTA logika (zero I/O), lustro `dca.py`
+        z odwróconymi kierunkami: `price_reached` = cena **≥** progu (wzrost do progu),
+        `signals_ok` = `top_count_met ≥ min_top_signals` (licznik SZCZYTU z
+        `evaluate_side(..., side=top)`), `next_trigger` = NAJNIŻSZY nieosiągnięty
+        próg pending (najbliższy W GÓRĘ). Alokacje w **% POZYCJI BTC** (`allocation_pct`),
+        agregaty: total/executed/pending w %, warning gdy suma > 100%.
+      - `conditions_met` tylko dla pending + cena + (sygnały OK lub brak bramki);
+        bramka z nieznanym licznikiem = NIE gotowa (bezpieczny default). Etykiety PL
+        opisowe, bez „kup/sprzedaj" (test pilnuje); pusty próg ceny → czytelna
+        etykieta „uzupełnij plan w arkuszu" (seed ma puste progi — nie zgadujemy).
+      - Testy: `tests/test_exit_plan.py` (15). **138 testów zielonych.**
 
 ---
 
