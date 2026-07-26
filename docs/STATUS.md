@@ -1,11 +1,16 @@
 # STATUS / Handover — BTC Bottom Tracker
 
-> Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **12 (automatyzacja —
-> GitHub Actions cron codziennego ingestu) ZAMKNIĘTE; `ingest-daily` DZIAŁA NA ŻYWO**. Projekt
-> funkcjonalnie kompletny (demo + live).
-> Wdrożone na Streamlit Community Cloud (APP_MODE=live — aplikacja działa w trybie live: BigQuery + Sheets): https://btc-bottom-tracker-n5nan3lmjyvhyhcwprxqer.streamlit.app/ — repo PUBLICZNE.
+> Plik przekazania stanu między czatami w Projekcie. Aktualny stan: **kroki 13–18
+> (WARSTWA SPRZEDAŻY + MAKRO) ZAMKNIĘTE w kodzie — 138 testów zielonych**. Sygnały
+> szczytu (side=top), osobny licznik makro risk-off (side=macro), plan transz
+> sprzedaży (`exit_plan.py` + `sell_tranches`), UI z dwoma zegarami. Kroki 13–18
+> powstały w sesji Claude Cowork 2026-07-26 (plan: `claude/PLAN_SELL_SIDE.md`
+> w Projekcie); paczki patch aplikowane przez Claude Code lokalnie.
+> **Po pushu wykonać „Uruchomienie LIVE po v13" z README (bootstrap → migrate_13
+> → klucz FRED)** — do tego czasu live działa po staremu (fallbacki pre-v13).
+> Wdrożone na Streamlit Community Cloud (APP_MODE=live): https://btc-bottom-tracker-n5nan3lmjyvhyhcwprxqer.streamlit.app/ — repo PUBLICZNE.
 > Architektura i instrukcje: README.md + docs/SETUP_GCP.md.
-> Ostatnia aktualizacja: 2026-06-29.
+> Ostatnia aktualizacja: 2026-07-26.
 
 ---
 
