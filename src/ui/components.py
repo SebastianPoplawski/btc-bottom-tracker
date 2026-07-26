@@ -125,22 +125,57 @@ def composite_summary(result: Any) -> None:
             st.caption(f"⚠️ {missing} wskaźnik(i) bez danych — nie wliczają się do licznika.")
 
 
+def _gauge_column(result: Any, title: str, note: str, key: str) -> None:
+    """Pojedyncza kolumna dual-gauge: tytuł, zegar, twardy licznik, werdykt."""
+    st.markdown(f"**{title}**")
+    st.plotly_chart(
+        _gauge_fig(result.weighted_ratio),
+        use_container_width=True,
+        config={"displayModeBar": False},
+        key=f"gauge_{key}",
+    )
+    st.caption(f"Twarde progi: {result.count_met}/{result.count_active} spełnione")
+    st.write(result.verdict)
+    if note:
+        st.caption(note)
+    missing = result.count_active - result.count_evaluable
+    if missing > 0:
+        st.caption(f"⚠️ {missing} wskaźnik(i) bez danych — nie wliczają się do licznika.")
+
+
+def dual_composite_summary(bottom: Any, top: Any) -> None:
+    """krok 17: dwa zegary obok siebie — DNO (okno zakupu) | SZCZYT (okno wyjścia).
+    Oba pokazują wynik ważony 0–100%; twarde liczniki w podpisach."""
+    col_b, col_t = st.columns(2)
+    with col_b:
+        _gauge_column(bottom, f"🟢 {T.GAUGE_BOTTOM_TITLE}", T.COMPOSITE_NOTE, "bottom")
+    with col_t:
+        _gauge_column(top, f"🔴 {T.GAUGE_TOP_TITLE}", T.COMPOSITE_NOTE_TOP, "top")
+
+
 # --------------------------------------------------------------------------- #
 # Siatka kart wskaźników
 # --------------------------------------------------------------------------- #
-def indicator_grid(result: Any, columns: int = 3) -> None:
-    st.subheader(T.SECTION_SIGNALS)
+def indicator_grid(result: Any, columns: int = 3, title: str = T.SECTION_SIGNALS,
+                   threshold_prefix: str = "próg dna:",
+                   help_map: Optional[dict] = None) -> None:
+    """Siatka kart wskaźników. Od kroku 17 parametryzowana (strony top/macro
+    podają własny tytuł, prefiks progu i mapę pomocy) — wywołanie bez
+    argumentów zachowuje się jak przed krokiem 17 (strona dna)."""
+    st.subheader(title)
     indicators = [i for i in result.indicators if i.active]
     inactive = [i for i in result.indicators if not i.active]
     cols = st.columns(columns)
     for idx, ind in enumerate(indicators):
-        _indicator_card(cols[idx % columns], ind)
+        _indicator_card(cols[idx % columns], ind, threshold_prefix,
+                        help_map if help_map is not None else T.INDICATOR_HELP)
     if inactive:
         st.caption("Nieaktywne progi (poza composite): "
                    + ", ".join(i.label for i in inactive))
 
 
-def _indicator_card(container, ind: Any) -> None:
+def _indicator_card(container, ind: Any, threshold_prefix: str = "próg dna:",
+                    help_map: Optional[dict] = None) -> None:
     color = _met_color(ind.met)
     label_met = T.MET_LABEL[ind.met]
     # Stopniowy F&G: spełniony, ale z wkładem częściowym (0 < contribution < weight).
@@ -148,7 +183,7 @@ def _indicator_card(container, ind: Any) -> None:
         label_met = "częściowy"
     value_str = T.format_value(ind.indicator, ind.value)
     thr_str = T.format_threshold(ind.operator, ind.threshold_value, ind.threshold_value2)
-    help_txt = T.INDICATOR_HELP.get(ind.indicator, "")
+    help_txt = (help_map or T.INDICATOR_HELP).get(ind.indicator, "")
     with container.container(border=True):
         st.markdown(
             f"<div style='display:flex;justify-content:space-between;align-items:center'>"
@@ -159,11 +194,22 @@ def _indicator_card(container, ind: Any) -> None:
         )
         st.markdown(
             f"<div class='btt-card-val' style='color:{color}'>{value_str}</div>"
-            f"<div class='btt-card-thr'>próg dna: {thr_str}</div>",
+            f"<div class='btt-card-thr'>{threshold_prefix} {thr_str}</div>",
             unsafe_allow_html=True,
         )
         if help_txt:
             st.caption(help_txt)
+
+
+# --------------------------------------------------------------------------- #
+# Panel makro (krok 17) — OSOBNY licznik risk-off, poza frameworkiem
+# --------------------------------------------------------------------------- #
+def macro_panel(result: Any) -> None:
+    indicator_grid(result, columns=4, title=T.SECTION_MACRO,
+                   threshold_prefix="warunek risk-off:",
+                   help_map=T.INDICATOR_HELP_MACRO)
+    st.write(result.verdict)
+    st.caption(T.MACRO_NOTE)
 
 
 # --------------------------------------------------------------------------- #
@@ -198,15 +244,26 @@ def history_charts(history_df: Any) -> None:
         )
         st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
+    # Pi Cycle (krok 17): 2x350DMA liczone TYLKO do wykresu (prezentacja),
+    # sygnał liczy composite z surowych ma_111d/ma_350d.
+    if "ma_350d" in history_df.columns and history_df["ma_350d"].notna().any():
+        history_df = history_df.assign(_pi_2x350=history_df["ma_350d"] * 2)
+
     c1, c2 = st.columns(2)
     with c1:
         _line([("price_usd", "Cena BTC", T.ACCENT),
                ("ma_200w", "200W MA", "#6fb1ff")], "Cena vs 200W MA")
         _line([("mvrv_z_score", "MVRV Z", "#f5c451"),
                ("nupl", "NUPL", "#9b8cff")], "MVRV Z / NUPL")
+        _line([("price_usd", "Cena BTC", T.ACCENT),
+               ("ma_111d", "111DMA", "#5fd3a3"),
+               ("_pi_2x350", "2× 350DMA", "#ff8c6b")], "Pi Cycle Top (111DMA vs 2× 350DMA)")
     with c2:
         _line([("fear_greed", "Fear & Greed", "#5fd3a3")], "Fear & Greed")
         _line([("whale_ratio", "Whale Ratio (ref.)", "#ff8c6b")], "Whale Ratio (referencyjnie)")
+        _line([("fed_funds_rate", "Stopa Fed", "#f5c451"),
+               ("dxy_proxy", "Dollar index (proxy)", "#6fb1ff"),
+               ("m2_yoy", "M2 r/r (%)", "#9b8cff")], "Makro (FRED)")
 
 
 # --------------------------------------------------------------------------- #
@@ -251,6 +308,54 @@ def dca_panel(state: Any) -> None:
     else:
         st.caption("Uzupełnij `allocation_usd` / `allocation_pct` w arkuszu, "
                    "by zobaczyć podsumowanie budżetu.")
+
+
+# --------------------------------------------------------------------------- #
+# Panel transz SPRZEDAŻY (krok 17) — lustro dca_panel; alokacje w % pozycji
+# --------------------------------------------------------------------------- #
+def exit_panel(state: Any) -> None:
+    st.subheader(T.SECTION_EXIT)
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Cena bieżąca", T.usd(state.current_price))
+    m2.metric("Sygnały szczytu", "—" if state.top_count_met is None else f"{state.top_count_met}")
+    m3.metric("Transze zrealizowane", f"{state.executed_count}")
+    m4.metric("Transze oczekujące", f"{state.pending_count}")
+
+    if state.conditions_met_now:
+        ids = ", ".join(f"#{t.tranche_id}" for t in state.conditions_met_now)
+        st.success(f"Warunki Twojego planu wyjścia spełnione dla transz: {ids} "
+                   f"(cena osiągnięta{' + dość sygnałów szczytu' if state.top_count_met is not None else ''}).")
+    elif state.next_trigger is not None:
+        nt = state.next_trigger
+        if nt.trigger_price_usd is not None:
+            st.info(f"Najbliższy próg w górę: transza #{nt.tranche_id} przy "
+                    f"{T.usd(nt.trigger_price_usd)}.")
+
+    import pandas as pd
+    rows = []
+    for t in state.tranches:
+        rows.append({
+            "#": t.tranche_id,
+            "Próg": T.usd(t.trigger_price_usd),
+            "% pozycji": "—" if t.allocation_pct is None else f"{t.allocation_pct:g}%",
+            "Min. sygn. szczytu": "—" if t.min_top_signals is None else t.min_top_signals,
+            "Status": T.STATUS_PL.get(t.status, t.status),
+            "Stan": t.state_label,
+        })
+    if rows:
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    else:
+        st.info("Brak transz sprzedaży — załóż zakładkę `sell_tranches` "
+                "(scripts/bootstrap_sheet.py) i wpisz progi swojego planu wyjścia.")
+
+    if state.total_alloc_pct is not None:
+        st.caption(f"Plan wyjścia obejmuje {state.total_alloc_pct:g}% pozycji "
+                   f"(zrealizowane: {state.executed_alloc_pct:g}%, "
+                   f"oczekujące: {state.pending_alloc_pct:g}%).")
+    elif rows:
+        st.caption("Uzupełnij `trigger_price_usd` i `allocation_pct` w zakładce "
+                   "`sell_tranches`, by plan wyjścia był policzalny.")
 
 
 # --------------------------------------------------------------------------- #

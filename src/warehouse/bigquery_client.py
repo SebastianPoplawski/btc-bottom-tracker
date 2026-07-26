@@ -85,7 +85,7 @@ _SELECTABLE = {
 _DEFAULT_COLS = [
     "reading_date", "price_usd", "mvrv_z_score", "nupl", "ma_200w",
     "whale_accumulating", "whale_ratio", "fear_greed", "days_since_ath",
-    "ma_111d", "ma_350d",
+    "ma_111d", "ma_350d", "fed_funds_rate", "dxy_proxy", "m2_yoy",
 ]
 
 

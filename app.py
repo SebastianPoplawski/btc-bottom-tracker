@@ -33,6 +33,7 @@ for _p in (
 import config                      # src/config.py
 import composite                   # src/logic/composite.py
 import dca                         # src/logic/dca.py
+import exit_plan                   # src/logic/exit_plan.py (krok 17)
 import components as ui            # src/ui/components.py
 import text_pl as T               # src/ui/text_pl.py
 
@@ -52,6 +53,7 @@ def _load_demo() -> dict:
         "reading": mock.latest_reading(seed),
         "history_df": mock.readings_df(seed),
         "dca_df": mock.dca_df(seed),
+        "sell_df": mock.sell_df(seed),       # krok 17: plan transz sprzedaży
         "freshness_msg": msg,
         "as_of": as_of,
         "warnings": [],
@@ -79,17 +81,32 @@ def _load_live() -> dict:
         reading = dict(sheets.build_reading_values(manual_row))
         reading["reading_date"] = manual_row.get("reading_date")
 
-    # 2) Auto-fetch — nadpisuje price/ma/fng gdy dostępne
+    # 2) Auto-fetch — nadpisuje price/ma/fng/makro gdy dostępne
     pdata = price_binance.get_price_and_ma()
     warnings += pdata.warnings
     if pdata.price_usd is not None:
         reading["price_usd"] = pdata.price_usd
     if pdata.ma_200w is not None:
         reading["ma_200w"] = pdata.ma_200w
+    if pdata.ma_111d is not None:            # krok 17: Pi Cycle
+        reading["ma_111d"] = pdata.ma_111d
+    if pdata.ma_350d is not None:
+        reading["ma_350d"] = pdata.ma_350d
     fg = fear_greed_api.fetch_fear_greed()
     warnings += fg.warnings
     if fg.value is not None:
         reading["fear_greed"] = fg.value
+    try:                                      # krok 17: makro FRED (opcjonalne)
+        import fred_api
+        macro = fred_api.get_macro()
+        warnings += macro.warnings
+        for key in ("fed_funds_rate", "fed_funds_delta_3m",
+                    "dxy_proxy", "dxy_delta_3m", "m2_yoy"):
+            val = getattr(macro, key)
+            if val is not None:
+                reading[key] = val
+    except Exception as exc:
+        warnings.append(f"Makro FRED niedostępne ({exc}).")
 
     # 3) Historia z BigQuery (pod wykresy) — opcjonalna
     try:
@@ -105,6 +122,7 @@ def _load_live() -> dict:
         "reading": reading,
         "history_df": history_df,
         "dca_df": dca_df,
+        "sell_df": bundle.sell,               # krok 17: plan transz sprzedaży
         "freshness_msg": bundle.freshness.message,
         "as_of": bundle.freshness.latest_date,
         "warnings": warnings,
@@ -148,25 +166,34 @@ def main() -> None:
 
     ui.page_header(settings.mode, data["freshness_msg"], data["as_of"])
 
-    # --- Composite (cała logika w composite.evaluate) ---
-    # graded_fng=True: F&G wnosi wkład STOPNIOWY do wyniku ważonego (headline gauge).
-    # Wpływa tylko na weighted_met/weighted_ratio — count_met (twardy licznik) bez zmian.
-    # filter_side (krok 13): config ma teraz strony bottom/top/macro — ten widok
-    # liczy framework DNA; warstwę top/macro dokłada do UI krok 17.
-    bottom_config = composite.filter_side(data["config"], composite.SIDE_BOTTOM)
-    result = composite.evaluate(bottom_config, data["reading"], graded_fng=True)
+    # --- Composite (cała logika w composite.evaluate_side) ---
+    # graded_fng=True: F&G wnosi wkład STOPNIOWY do wyniku ważonego (headline gauge);
+    # kierunek (fear/greed) rozpoznawany po operatorze wiersza. Twardy count bez zmian.
+    # krok 17: TRZY strony — dno (framework, jak dotąd), szczyt (framework, warstwa
+    # sprzedaży) i makro (OSOBNY licznik risk-off, poza frameworkiem).
+    result = composite.evaluate_side(
+        data["config"], data["reading"], composite.SIDE_BOTTOM, graded_fng=True)
+    top_result = composite.evaluate_side(
+        data["config"], data["reading"], composite.SIDE_TOP, graded_fng=True)
+    macro_result = composite.evaluate_side(
+        data["config"], data["reading"], composite.SIDE_MACRO)
 
-    ui.composite_summary(result)
+    ui.dual_composite_summary(result, top_result)
     st.divider()
-    ui.indicator_grid(result)
+    ui.indicator_grid(result)                       # karty dna (jak dotąd)
+    st.divider()
+    ui.indicator_grid(top_result, title=T.SECTION_TOP,
+                      threshold_prefix="próg szczytu:",
+                      help_map=T.INDICATOR_HELP_TOP)  # karty szczytu (krok 17)
+    st.divider()
+    ui.macro_panel(macro_result)                    # kontekst makro (krok 17)
     st.divider()
 
-    # --- DCA: opcjonalna ręczna cena (demo bez ceny; live pre-fill z auto-fetch) ---
-    st.subheader(T.SECTION_DCA)
+    # --- Jedna cena dla OBU planów (DCA + wyjście); demo bez ceny, live pre-fill ---
     auto_price = _reading_price(data["reading"])  # surowa cena z odczytu
     default_price = auto_price if auto_price is not None else 0.0
     price_in = st.number_input(
-        "Cena BTC (USD) do oceny progów DCA — 0 = nieznana",
+        "Cena BTC (USD) do oceny progów planów (DCA i wyjścia) — 0 = nieznana",
         min_value=0.0, value=default_price, step=500.0,
         help="W trybie live pole jest wstępnie wypełnione ceną z auto-fetch.",
     )
@@ -178,11 +205,22 @@ def main() -> None:
     ui.dca_panel(dca_state)
     st.divider()
 
+    # --- Plan transz sprzedaży (krok 17) — bramka na sygnałach SZCZYTU ---
+    exit_state = exit_plan.compute_exit_state(
+        data.get("sell_df"), current_price=current_price,
+        top_count_met=top_result.count_met,
+    )
+    ui.exit_panel(exit_state)
+    st.divider()
+
     # --- Wykresy ---
     ui.history_charts(data["history_df"])
 
     # --- Uwagi + disclaimer ---
-    ui.warnings_block(list(result.warnings) + list(data["warnings"]) + list(dca_state.warnings))
+    ui.warnings_block(
+        list(result.warnings) + list(top_result.warnings) + list(macro_result.warnings)
+        + list(data["warnings"]) + list(dca_state.warnings) + list(exit_state.warnings)
+    )
     ui.footer(composite.DISCLAIMER)
 
 

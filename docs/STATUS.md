@@ -184,6 +184,31 @@
         opisowe, bez „kup/sprzedaj" (test pilnuje); pusty próg ceny → czytelna
         etykieta „uzupełnij plan w arkuszu" (seed ma puste progi — nie zgadujemy).
       - Testy: `tests/test_exit_plan.py` (15). **138 testów zielonych.**
+- [x] **17 — Warstwa sprzedaży: UI Streamlit** — ZROBIONE:
+      - **Układ (jedna strona, scroll):** nagłówek → **dwa zegary obok siebie**
+        (🟢 „Dno — okno zakupu" | 🔴 „Szczyt — okno wyjścia"; oba = wynik ważony 0–100%,
+        twardy licznik w podpisie, werdykt pod zegarem) → karty dna (jak dotąd) →
+        **karty szczytu** → **panel makro risk-off** (4 karty + werdykt „Otoczenie
+        makro…") → JEDNO pole ceny dla obu planów → panel DCA → **panel transz
+        sprzedaży** → wykresy → uwagi → disclaimer.
+      - `components.py`: `dual_composite_summary` (+`_gauge_column` z unikalnym `key`),
+        `indicator_grid` sparametryzowany (title/threshold_prefix/help_map — wywołanie
+        bez argumentów = strona dna, zero regresji), `macro_panel`, `exit_panel`
+        (lustro dca_panel; % pozycji, „najbliższy próg w górę"). Wykresy: + Pi Cycle
+        (cena vs 111DMA vs 2×350DMA — 2×350 liczone TYLKO do wykresu) i makro FRED.
+      - `text_pl.py`: sekcje/tytuły zegarów, `COMPOSITE_NOTE_TOP`, `MACRO_NOTE`,
+        `INDICATOR_HELP_TOP/MACRO`, formaty wartości (months „X.X mies.", pi_cycle
+        TAK/NIE, delty ±, m2 % r/r, ETF ±$).
+      - `app.py`: trzy `evaluate_side` (bottom/top/macro), `sell_df` w demo
+        (`mock.sell_df`) i live (`bundle.sell`); live dociąga też ma_111d/ma_350d
+        + makro FRED do bieżącego odczytu; `exit_plan.compute_exit_state` bramkowany
+        licznikiem SZCZYTU. `_DEFAULT_COLS` read_history + kolumny makro (wykresy).
+      - **Zweryfikowane renderem headless Chromium (demo):** wszystkie sekcje obecne,
+        zero traceback; wartości zgodne z seedem (dno 4.4%/1z6, szczyt 0%/0z6,
+        „Czas od halvingu 25.4 mies." = niespełniony, makro 0/4 brak danych).
+      - **Dash (`app_dash.py`) celowo zostaje bottom-only** (filter_side z kroku 13) —
+        parytet wariantu Dash poza zakresem 13–18; nie blokuje deployu (Streamlit only).
+      - **138 testów zielonych** (UI bez nowych testów jednostkowych — smoke renderem).
 
 ---
 
