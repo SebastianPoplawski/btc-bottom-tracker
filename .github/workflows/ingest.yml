@@ -46,4 +46,8 @@ jobs:
           # Ten plik czytaja i bigquery_client, i sheets. Runner jest efemeryczny —
           # klucz znika razem z maszyna po zakonczeniu joba.
           GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+          # FRED (krok 15, makro): darmowy klucz w GitHub Secrets. Gdy sekret
+          # nie jest ustawiony, env jest pusty -> ingest dziala, pola makro
+          # pozostaja puste (warning w logu) — nie blokuje crona.
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: python src/ingestion/run_ingest.py

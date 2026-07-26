@@ -147,6 +147,31 @@
         months ~25.4→False — halving 2024-04-20 poza oknem 12–18; sygnał realnie na
         NASTĘPNY cykl), macro 0/4 (brak danych). Testy: `tests/test_topside.py` (18).
         **108 testów zielonych.**
+- [x] **15 — Warstwa sprzedaży: INGESTION (dzienne MA + FRED)** — ZROBIONE:
+      - **`price_binance.py`:** świece DZIENNE (Binance `1d` → fallback Kraken
+        `interval=1440`, jak tygodniowe; Kraken daje ~720 świec — starcza na 350DMA).
+        `_parse_kraken_ohlc` dostał parametr `period_seconds` (domyślnie tydzień —
+        wstecznie kompatybilne). `PriceData` + `ma_111d`/`ma_350d`/`days_available`
+        (nowe pola z domyślnymi). `get_price_and_ma()` liczy 111/350DMA z dziennych.
+      - **NOWY `src/ingestion/fred_api.py`:** DFF (stopa Fed + delta ~3M), DTWEXBGS
+        (broad dollar index + delta ~3M; klasycznego DXY nie ma na FRED), M2SL (YoY %).
+        Czysta logika (`value_on_or_before` — odporna na luki weekend/miesiąc,
+        `compute_delta`, `compute_yoy_pct`) testowalna bez sieci. Klucz:
+        `st.secrets["FRED_API_KEY"]` / env; **bez klucza łagodna degradacja**
+        (pola puste + warning z linkiem do rejestracji). Awaria jednej serii nie
+        blokuje pozostałych (osobne try per seria).
+      - **`run_ingest.py`:** `_AUTO_FIELDS` + ma_111d/ma_350d/makro; makro w try —
+        NIGDY nie wywala ingestu. `etf_flows_usd_7d`/`halving_date` idą ścieżką
+        ręczną z arkusza (UPSERT_FIELDS z kroku 13).
+      - **CI/sekrety:** `ingest.yml` przekazuje `FRED_API_KEY` z GitHub Secrets
+        (pusty sekret = ingest działa, makro puste); `secrets.toml.example` +
+        wpis FRED_API_KEY. **Do zrobienia ręcznie:** darmowy klucz FRED →
+        secrets.toml lokalnie + Streamlit Cloud Secrets + GitHub Secret `FRED_API_KEY`.
+      - **Uwaga sandbox:** w środowisku dev Claude sieć do Binance/Kraken/FRED jest
+        blokowana (proxy) — łańcuch fallbacków zweryfikowany jako łagodna degradacja;
+        realny fetch zweryfikować lokalnie: `BTT_DRY_RUN=1 python src/ingestion/run_ingest.py`.
+      - Testy: `tests/test_fred.py` (11) + rozszerzony `test_price.py` (4 nowe).
+        **123 testy zielone.**
 
 ---
 

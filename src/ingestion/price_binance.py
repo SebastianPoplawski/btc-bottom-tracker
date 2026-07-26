@@ -31,9 +31,15 @@ KRAKEN_BASE = "https://api.kraken.com"
 SYMBOL = "BTCUSDT"
 KRAKEN_PAIR = "XBTUSD"                # Kraken: para BTC/USD (klucz w result to zwykle XXBTZUSD)
 KRAKEN_INTERVAL = 10080              # minut = 1 tydzien (Kraken OHLC interval)
+KRAKEN_INTERVAL_DAILY = 1440         # minut = 1 dzien (krok 15: Pi Cycle)
 WEEK_SECONDS = 604800               # 7 dni w sekundach (do odrzucenia biezacego tygodnia)
+DAY_SECONDS = 86400                 # 1 dzien w sekundach (do odrzucenia biezacego dnia)
 MA_WINDOW = 200
 WEEKLY_LIMIT = MA_WINDOW + 12        # zapas na odrzucenie biezacego (niezamknietego) tygodnia
+# Pi Cycle Top (krok 15): 111DMA i 350DMA z dziennych zamkniec.
+MA_111_WINDOW = 111
+MA_350_WINDOW = 350
+DAILY_LIMIT = MA_350_WINDOW + 10     # zapas; Binance klines max 1000, Kraken OHLC ~720 — wystarcza
 HTTP_TIMEOUT = 15
 _USER_AGENT = "btc-bottom-tracker/0.2 (ingestion)"
 
@@ -86,13 +92,15 @@ def _kraken_pair_key(result: dict) -> Optional[str]:
     return next((k for k in result if k != "last"), None)
 
 
-def _parse_kraken_ohlc(payload: dict, now_ms: Optional[int] = None) -> list[tuple[date, float]]:
-    """Surowa odpowiedz Kraken OHLC -> [(data_tygodnia, close)], posortowane rosnaco.
+def _parse_kraken_ohlc(payload: dict, now_ms: Optional[int] = None,
+                       period_seconds: int = WEEK_SECONDS) -> list[tuple[date, float]]:
+    """Surowa odpowiedz Kraken OHLC -> [(data_okresu, close)], posortowane rosnaco.
 
     Kraken zwraca {"error":[...], "result": {"<PARA>": [[time, o, h, l, c, vwap, vol, count], ...],
     "last": <id>}}. Klucz pary to jedyny klucz w result rozny od "last" (zwykle XXBTZUSD).
-    `time` to start tygodnia (unix sekundy); odrzucamy biezacy, niezamkniety tydzien
-    (time + WEEK_SECONDS w przyszlosci) — analogicznie do _parse_klines z closeTime."""
+    `time` to start okresu (unix sekundy); odrzucamy biezacy, niezamkniety okres
+    (time + period_seconds w przyszlosci) — analogicznie do _parse_klines z closeTime.
+    period_seconds: WEEK_SECONDS dla swiec tygodniowych, DAY_SECONDS dla dziennych (krok 15)."""
     if now_ms is None:
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     result = payload.get("result", {})
@@ -102,9 +110,9 @@ def _parse_kraken_ohlc(payload: dict, now_ms: Optional[int] = None) -> list[tupl
     out: list[tuple[date, float]] = []
     for row in result[pair_key]:
         open_time_s = int(row[0])
-        close_time_ms = (open_time_s + WEEK_SECONDS) * 1000
+        close_time_ms = (open_time_s + period_seconds) * 1000
         if close_time_ms > now_ms:
-            continue  # tydzien jeszcze trwa -> pomijamy do liczenia MA
+            continue  # okres jeszcze trwa -> pomijamy do liczenia MA
         out.append((
             datetime.fromtimestamp(open_time_s, tz=timezone.utc).date(),
             float(row[4]),
@@ -152,6 +160,40 @@ def fetch_weekly_closes() -> tuple[list[tuple[date, float]], list[str]]:
         return fetch_weekly_closes_kraken(), warnings
     except Exception as exc:
         warnings.append(f"Kraken klines niedostepne ({exc}); ma_200w=None (mozna wpisac recznie).")
+        return [], warnings
+
+
+# --- swiece dzienne (krok 15: Pi Cycle 111DMA / 350DMA) -------------------- #
+@_maybe_cache(ttl_seconds=3600)
+def fetch_daily_closes_binance(symbol: str = SYMBOL, limit: int = DAILY_LIMIT) -> list[tuple[date, float]]:
+    raw = _get_json(f"{BINANCE_BASE}/api/v3/klines",
+                    {"symbol": symbol, "interval": "1d", "limit": limit})
+    return _parse_klines(raw)  # filtr closeTime dziala tak samo dla 1d
+
+
+@_maybe_cache(ttl_seconds=3600)
+def fetch_daily_closes_kraken(pair: str = KRAKEN_PAIR) -> list[tuple[date, float]]:
+    payload = _get_json(f"{KRAKEN_BASE}/0/public/OHLC",
+                        {"pair": pair, "interval": KRAKEN_INTERVAL_DAILY})
+    err = payload.get("error") or []
+    if err:
+        raise requests.RequestException(f"Kraken API error: {err}")
+    return _parse_kraken_ohlc(payload, period_seconds=DAY_SECONDS)
+
+
+def fetch_daily_closes() -> tuple[list[tuple[date, float]], list[str]]:
+    """Swiece dzienne pod Pi Cycle: Binance -> Kraken (identyczny lancuch jak tygodniowe).
+    Kraken OHLC zwraca ~720 dziennych swiec — wystarcza na 350DMA."""
+    warnings: list[str] = []
+    try:
+        return fetch_daily_closes_binance(), warnings
+    except Exception as exc:
+        logger.warning("Binance klines 1d niedostepne (%s); probuje Kraken.", exc)
+        warnings.append(f"Binance klines 1d niedostepne ({exc}); fallback na Kraken (US/chmura).")
+    try:
+        return fetch_daily_closes_kraken(), warnings
+    except Exception as exc:
+        warnings.append(f"Kraken klines 1d niedostepne ({exc}); ma_111d/ma_350d=None.")
         return [], warnings
 
 
@@ -227,10 +269,15 @@ class PriceData:
     ma_200w: Optional[float]
     weeks_available: int
     warnings: list[str] = field(default_factory=list)
+    # krok 15: Pi Cycle (nowe pola z domyslnymi -> kompatybilnosc wstecz)
+    ma_111d: Optional[float] = None
+    ma_350d: Optional[float] = None
+    days_available: int = 0
 
 
 def get_price_and_ma() -> PriceData:
-    """Komplet: cena spot + 200W MA. Bledy jako 'warnings', pola None gdy brak danych."""
+    """Komplet: cena spot + 200W MA + 111/350DMA (Pi Cycle, krok 15).
+    Bledy jako 'warnings', pola None gdy brak danych."""
     warnings: list[str] = []
     price, w = fetch_spot_price()
     warnings += w
@@ -242,7 +289,17 @@ def get_price_and_ma() -> PriceData:
     if ma is None and weeks > 0:
         warnings.append(f"Za malo zamkniec tygodniowych do 200W MA ({weeks} < {MA_WINDOW}).")
 
-    return PriceData(price_usd=price, ma_200w=ma, weeks_available=weeks, warnings=warnings)
+    daily, w = fetch_daily_closes()
+    warnings += w
+    days = len(daily)
+    daily_closes = [c for _, c in daily]
+    ma111 = compute_200w_ma(daily_closes, window=MA_111_WINDOW)
+    ma350 = compute_200w_ma(daily_closes, window=MA_350_WINDOW)
+    if days > 0 and (ma111 is None or ma350 is None):
+        warnings.append(f"Za malo zamkniec dziennych do Pi Cycle ({days} < {MA_350_WINDOW}).")
+
+    return PriceData(price_usd=price, ma_200w=ma, weeks_available=weeks,
+                     warnings=warnings, ma_111d=ma111, ma_350d=ma350, days_available=days)
 
 
 if __name__ == "__main__":

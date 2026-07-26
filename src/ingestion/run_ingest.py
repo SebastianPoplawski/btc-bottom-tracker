@@ -5,10 +5,11 @@ Spina auto-fetch (Binance: cena + 200W MA; alternative.me: F&G) z RECZNYMI wskaz
 z arkusza (sheets.py) i zapisuje komplet do `indicator_readings` przez `upsert_reading`.
 
 Zasada laczenia pol:
-  - AUTO wygrywa dla: price_usd, ma_200w, fear_greed
+  - AUTO wygrywa dla: price_usd, ma_200w, fear_greed, ma_111d, ma_350d (krok 15),
+    fed_funds_rate, fed_funds_delta_3m, dxy_proxy, dxy_delta_3m, m2_yoy (FRED, krok 15)
     (gdy auto-fetch zawiedzie -> fallback na wartosc reczna z arkusza, jesli jest),
   - RECZNE (arkusz) dostarcza: mvrv_z_score, nupl, whale_accumulating, whale_ratio,
-    ath_date, days_since_ath, notes.
+    ath_date, days_since_ath, halving_date, etf_flows_usd_7d, notes.
 
 Uruchomienie z korzenia repo (APP_MODE=live, skonfigurowane BQ + Sheets):
     python src/ingestion/run_ingest.py          # zapis
@@ -24,7 +25,7 @@ from typing import Any, Optional
 
 # Importy dzialaja i jako pakiet, i przy bezposrednim uruchomieniu skryptu.
 try:
-    from . import price_binance, fear_greed_api, sheets
+    from . import price_binance, fear_greed_api, fred_api, sheets
     from ..warehouse import bigquery_client as wh
 except ImportError:  # python src/ingestion/run_ingest.py
     import os
@@ -34,12 +35,18 @@ except ImportError:  # python src/ingestion/run_ingest.py
     sys.path.insert(0, os.path.join(_here, "..", "warehouse"))  # src/warehouse
     import price_binance          # type: ignore
     import fear_greed_api         # type: ignore
+    import fred_api               # type: ignore
     import sheets                 # type: ignore
     import bigquery_client as wh  # type: ignore
 
 logger = logging.getLogger(__name__)
 
-_AUTO_FIELDS = ("price_usd", "ma_200w", "fear_greed")
+# AUTO wygrywa nad arkuszem; arkusz = fallback gdy auto-fetch zawiedzie.
+# Krok 15: dochodza MA Pi Cycle (Binance/Kraken) i makro (FRED).
+_AUTO_FIELDS = ("price_usd", "ma_200w", "fear_greed",
+                "ma_111d", "ma_350d",
+                "fed_funds_rate", "fed_funds_delta_3m",
+                "dxy_proxy", "dxy_delta_3m", "m2_yoy")
 
 
 @dataclass
@@ -55,19 +62,36 @@ def collect_values(reading_date: date, use_sheet_manual: bool = True) -> tuple[d
     warnings: list[str] = []
     values: dict[str, Any] = {}
 
-    # 1) AUTO: cena spot + 200W MA (Binance; fallback CoinGecko dla ceny)
+    # 1) AUTO: cena spot + 200W MA + 111/350DMA (Binance; fallbacki CoinGecko/Kraken)
     pdata = price_binance.get_price_and_ma()
     warnings += pdata.warnings
     if pdata.price_usd is not None:
         values["price_usd"] = pdata.price_usd
     if pdata.ma_200w is not None:
         values["ma_200w"] = pdata.ma_200w
+    if pdata.ma_111d is not None:
+        values["ma_111d"] = pdata.ma_111d
+    if pdata.ma_350d is not None:
+        values["ma_350d"] = pdata.ma_350d
 
     # 2) AUTO: Fear & Greed (alternative.me)
     fg = fear_greed_api.fetch_fear_greed()
     warnings += fg.warnings
     if fg.value is not None:
         values["fear_greed"] = fg.value
+
+    # 2b) AUTO: makro z FRED (krok 15) — bez klucza degraduje sie do warninga;
+    # kazda seria w osobnym try wewnatrz get_macro (awaria jednej nie blokuje reszty).
+    try:
+        macro = fred_api.get_macro()
+        warnings += macro.warnings
+        for key in ("fed_funds_rate", "fed_funds_delta_3m",
+                    "dxy_proxy", "dxy_delta_3m", "m2_yoy"):
+            val = getattr(macro, key)
+            if val is not None:
+                values[key] = val
+    except Exception as exc:  # defensywnie: makro NIGDY nie wywala ingestu
+        warnings.append(f"Makro FRED niedostepne ({exc}) — pola makro pominiete.")
 
     # 3) RECZNE z arkusza (najnowszy wiersz indicator_readings)
     if use_sheet_manual:

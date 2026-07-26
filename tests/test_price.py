@@ -95,3 +95,52 @@ def test_parse_kraken_ticker_none_when_no_pair_key():
     # Defensywnie: brak klucza pary -> None, bez wyjatku.
     assert pb._parse_kraken_ticker({"result": {}}) is None
     assert pb._parse_kraken_ticker({"result": {"XXBTZUSD": {}}}) is None
+
+
+# --------------------------------------------------------------------------- #
+# krok 15: swiece dzienne (Pi Cycle 111DMA / 350DMA)
+# --------------------------------------------------------------------------- #
+_DAY = 86400
+_D_A = 1_700_000_000                 # dzien zamkniety
+_D_B = _D_A + _DAY                   # zamkniety
+_D_C = _D_B + _DAY                   # biezacy (niezamkniety wzgledem _NOW_D)
+_NOW_D = (_D_C + 100) * 1000         # A i B zamkniete; C jeszcze trwa
+
+_KRAKEN_DAILY = {
+    "error": [],
+    "result": {
+        "XXBTZUSD": [
+            [_D_B, "20500.0", "21500.0", "20000.0", "21000.0", "20800.0", "123.4", 456],
+            [_D_A, "19000.0", "20600.0", "18800.0", "20000.5", "19900.0", "234.5", 567],
+            [_D_C, "21000.0", "22000.0", "20900.0", "21900.9", "21500.0", "12.3",  78],
+        ],
+        "last": _D_C,
+    },
+}
+
+
+def test_parse_kraken_ohlc_daily_period_drops_current_day():
+    out = pb._parse_kraken_ohlc(_KRAKEN_DAILY, now_ms=_NOW_D, period_seconds=pb.DAY_SECONDS)
+    assert len(out) == 2  # C (biezacy dzien) odrzucony
+    assert [c for _, c in out] == [20000.5, 21000.0]
+
+
+def test_parse_kraken_ohlc_weekly_default_unchanged():
+    # Domyslne period_seconds=WEEK_SECONDS: dla tych timestampow zaden "tydzien"
+    # nie jest zamkniety wzgledem _NOW_D -> pusta lista (regresja starego zachowania).
+    out = pb._parse_kraken_ohlc(_KRAKEN_DAILY, now_ms=_NOW_D)
+    assert out == []
+
+
+def test_compute_ma_generic_windows():
+    closes = [float(i) for i in range(1, 401)]  # 1..400
+    ma111 = pb.compute_200w_ma(closes, window=pb.MA_111_WINDOW)
+    ma350 = pb.compute_200w_ma(closes, window=pb.MA_350_WINDOW)
+    assert ma111 == sum(range(290, 401)) / 111
+    assert ma350 == sum(range(51, 401)) / 350
+    assert pb.compute_200w_ma(closes[:100], window=pb.MA_350_WINDOW) is None
+
+
+def test_pricedata_backward_compatible_defaults():
+    d = pb.PriceData(price_usd=1.0, ma_200w=2.0, weeks_available=3)
+    assert d.ma_111d is None and d.ma_350d is None and d.days_available == 0
