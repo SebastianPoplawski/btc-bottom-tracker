@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  issues: write   # krok 20: alerty jako Issue (GitHub sam wysyła mail o nowym issue)
 
 concurrency:
   group: ingest-daily
@@ -51,3 +52,12 @@ jobs:
           # pozostaja puste (warning w logu) — nie blokuje crona.
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: python src/ingestion/run_ingest.py
+      - name: Check alerts (Issue -> mail)
+        # Krok 20: porownaj dzis vs poprzedni odczyt; przy zmianie sygnalow/transz
+        # utworz Issue (GITHUB_TOKEN wystarcza dzieki permissions: issues: write).
+        # Best-effort: skrypt ZAWSZE konczy sie exit 0 — nie zawala crona ingestu.
+        if: success()
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa.json
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/check_alerts.py

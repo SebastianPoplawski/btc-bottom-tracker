@@ -230,6 +230,27 @@
       - **Pętla tygodniowa bez zmian w składni** — daty cyklu jadą teraz same:
         `python scripts/add_reading.py --mvrv … --nupl … [--whale TRUE/FALSE]
         [--etf-flows -230000000]`.
+- [x] **20 — ALERTY (Issue → mail) z dziennego crona** — ZROBIONE:
+      - **Mechanizm bez SMTP i bez nowych sekretów:** po udanym ingeście cron odpala
+        `scripts/check_alerts.py`, który porównuje DZISIEJSZY odczyt z POPRZEDNIM
+        (oba z BQ, liczone AKTUALNYM configiem — stateless, zmiana progu nie generuje
+        fałszywego alertu) i przy zmianie tworzy **GitHub Issue** przez wbudowany
+        `GITHUB_TOKEN` (`permissions: issues: write` w ingest.yml) — GitHub sam wysyła
+        maila o nowym issue. Repo publiczne → issue też publiczne (tylko liczniki/ceny
+        rynkowe, zero danych o pozycjach).
+      - **Alarmowane:** zmiana licznika DNA (góra i dół), zmiana licznika SZCZYTU,
+        NOWE „gotowe" transze DCA/sprzedaży (znikanie z ready — celowo cisza).
+        Makro celowo POZA alertami (kontekst ≠ sygnał). Pierwszy przebieg / <2 odczyty
+        → cisza. Treść issue: opisowa PL + disclaimer + link do dashboardu.
+      - **Best-effort:** check_alerts ZAWSZE kończy exit 0 (błąd BQ/GitHub API =
+        log, nie porażka crona) — obserwowalność ingestu zostaje na run_ingest.
+      - `src/logic/alerts.py` — czysta logika (snapshot przez te same evaluate_side/
+        compute_dca_state/compute_exit_state co UI — alert nie rozjedzie się z
+        dashboardem); `scripts/check_alerts.py` — glue BQ + GitHub API (`--dry-run`).
+      - Testy: `tests/test_alerts.py` (13). **161 testów zielonych.**
+      - **Uwaga:** mail przyjdzie, jeśli obserwujesz własne repo (Watch → All activity
+        lub Custom+Issues — domyślne dla właściciela) i masz włączone powiadomienia
+        e-mail dla Issues w github.com/settings/notifications.
 
 ---
 
