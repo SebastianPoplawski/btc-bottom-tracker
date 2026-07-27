@@ -30,6 +30,14 @@ Przyklad (Windows / PowerShell, z korzenia repo, .venv aktywny):
 Domyslnie reading_date = dzis. whale_accumulating zostaw PUSTE, jesli nie masz swiezej,
 pewnej oceny (puste = "brak danych", composite tego nie liczy jako spelnione).
 
+Krok 19 (v13):
+  --halving-date YYYY-MM-DD  -> kolumna halving_date (wpisujesz RAZ; months_since_halving computed)
+  --etf-flows <liczba USD>   -> kolumna etf_flows_usd_7d (makro, wpis reczny; ujemne = odplywy)
+  AUTO-PRZENOSZENIE: przy DOPISYWANIU nowego wiersza puste `ath_date` i `halving_date`
+  sa kopiowane z poprzedniego (najnowszego) wiersza — daty cyklu wpisujesz raz i nie
+  musisz o nich pamietac co tydzien. Wylaczenie: --no-carry. Przy AKTUALIZACJI
+  istniejacego wiersza nic nie jest przenoszone (istniejace komorki i tak zostaja).
+
 Zaleznosci: gspread, google-auth (sa w requirements.txt).
 """
 
@@ -58,7 +66,15 @@ SHEET_ID = os.getenv("GOOGLE_SHEET_ID", DEFAULT_SHEET_ID)
 TAB_READINGS = os.getenv("SHEET_TAB_READINGS", "indicator_readings")
 
 # Pola dociagane z API — zawsze puste w arkuszu (fallback only).
-AUTO_FIELDS = {"price_usd", "ma_200w", "fear_greed"}
+# v13: dochodza MA Pi Cycle i makro FRED (tez AUTO — nie wpisuj recznie).
+AUTO_FIELDS = {"price_usd", "ma_200w", "fear_greed",
+               "ma_111d", "ma_350d",
+               "fed_funds_rate", "fed_funds_delta_3m",
+               "dxy_proxy", "dxy_delta_3m", "m2_yoy"}
+
+# Daty cyklu wpisywane RAZ — przy dopisywaniu nowego wiersza przenoszone
+# z poprzedniego, jesli nie podano (krok 19).
+CARRY_FIELDS = ("ath_date", "halving_date")
 
 
 # --------------------------------------------------------------------------- #
@@ -143,9 +159,68 @@ def build_values(args: argparse.Namespace) -> dict[str, str]:
         out["days_since_ath"] = norm_number(args.days_ath, "days_since_ath")
     if args.ath_date is not None:
         out["ath_date"] = norm_date(args.ath_date, "ath_date")
+    if args.halving_date is not None:                                   # krok 19
+        out["halving_date"] = norm_date(args.halving_date, "halving_date")
+    if args.etf_flows is not None:                                      # krok 19
+        out["etf_flows_usd_7d"] = norm_number(args.etf_flows, "etf_flows_usd_7d")
     if args.notes is not None:
         out["notes"] = str(args.notes)
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Czysta logika wiersza (testowalna bez sieci) — krok 19
+# --------------------------------------------------------------------------- #
+def _latest_data_row(values: list[list[str]], rd_col: int) -> Optional[list[str]]:
+    """Wiersz z najpozniejsza poprawna data ISO w kolumnie reading_date (albo None)."""
+    best: Optional[tuple[date, list[str]]] = None
+    for row in values[1:]:
+        if len(row) <= rd_col:
+            continue
+        try:
+            d = date.fromisoformat(row[rd_col].strip())
+        except ValueError:
+            continue
+        if best is None or d > best[0]:
+            best = (d, row)
+    return best[1] if best else None
+
+
+def plan_row(header: list[str], values: list[list[str]], provided: dict[str, str],
+             carry: bool = True) -> tuple[Optional[int], list[str], dict[str, str]]:
+    """Planuje zapis: (numer_istniejacego_wiersza|None, pelny_wiersz, przeniesione_pola).
+
+    UPSERT po reading_date. Przy DOPISYWANIU nowego wiersza i carry=True puste pola
+    z CARRY_FIELDS (ath_date, halving_date) kopiowane sa z najnowszego istniejacego
+    wiersza — daty cyklu wpisujesz raz. Wartosc podana jawnie zawsze wygrywa."""
+    idx = {name: i for i, name in enumerate(header)}
+    rd_col = idx["reading_date"]
+    rd = provided["reading_date"]
+
+    found_row: Optional[int] = None
+    base = [""] * len(header)
+    for i, row in enumerate(values[1:], start=2):
+        if len(row) > rd_col and row[rd_col].strip() == rd:
+            found_row = i
+            base = (row + [""] * len(header))[:len(header)]  # zachowaj istniejace komorki
+            break
+
+    carried: dict[str, str] = {}
+    if carry and found_row is None:
+        prev = _latest_data_row(values, rd_col)
+        if prev is not None:
+            for f in CARRY_FIELDS:
+                if f in idx and not provided.get(f):
+                    v = prev[idx[f]].strip() if len(prev) > idx[f] else ""
+                    if v:
+                        base[idx[f]] = v
+                        carried[f] = v
+
+    # Nadpisz pola podane przez uzytkownika (jawne > przeniesione > istniejace).
+    for col, val in provided.items():
+        base[idx[col]] = val
+
+    return found_row, base, carried
 
 
 def main() -> None:
@@ -163,7 +238,13 @@ def main() -> None:
     p.add_argument("--whale-ratio", dest="whale_ratio", help="whale_ratio referencyjnie (np. 0.64)")
     p.add_argument("--days-ath", dest="days_ath", help="days_since_ath (opcjonalne; gdy computed z ath_date — pomin)")
     p.add_argument("--ath-date", dest="ath_date", help="ath_date YYYY-MM-DD")
+    p.add_argument("--halving-date", dest="halving_date",
+                   help="halving_date YYYY-MM-DD (wpisujesz RAZ; potem przenosi sie samo)")
+    p.add_argument("--etf-flows", dest="etf_flows",
+                   help="etf_flows_usd_7d — przeplywy netto ETF spot 7d w USD (ujemne = odplywy)")
     p.add_argument("--notes", help="notatka")
+    p.add_argument("--no-carry", dest="no_carry", action="store_true",
+                   help="NIE przenos ath_date/halving_date z poprzedniego wiersza")
     p.add_argument("--dry-run", action="store_true", help="pokaz wiersz bez zapisu")
     args = p.parse_args()
 
@@ -193,30 +274,26 @@ def main() -> None:
 
     unknown = [k for k in provided if k not in idx]
     if unknown:
-        sys.exit(f"Kolumny spoza naglowka arkusza: {unknown}. Sprawdz layout (docs/SHEETS_LAYOUT.md).")
+        sys.exit(f"Kolumny spoza naglowka arkusza: {unknown}. Sprawdz layout "
+                 f"(docs/SHEETS_LAYOUT.md); dla kolumn v13 uruchom scripts/bootstrap_sheet.py.")
 
     rd = provided["reading_date"]
-
-    # UPSERT po reading_date: szukaj istniejacego wiersza.
-    rd_col = idx["reading_date"]
-    found_row = None  # 1-based numer wiersza w arkuszu
-    base = [""] * len(header)
-    for i, row in enumerate(values[1:], start=2):
-        if len(row) > rd_col and row[rd_col].strip() == rd:
-            found_row = i
-            base = (row + [""] * len(header))[:len(header)]  # zachowaj istniejace komorki
-            break
-
-    # Nadpisz tylko pola podane przez uzytkownika.
-    for col, val in provided.items():
-        base[idx[col]] = val
+    found_row, base, carried = plan_row(header, values, provided, carry=not args.no_carry)
 
     action = f"AKTUALIZACJA wiersza {found_row}" if found_row else "DOPISANIE nowego wiersza"
     print(f"\n{action} dla reading_date={rd}:")
     for name in header:
         cell = base[idx[name]]
-        tag = "  (AUTO/puste)" if name in AUTO_FIELDS else ""
+        if name in AUTO_FIELDS:
+            tag = "  (AUTO/puste)"
+        elif name in carried:
+            tag = "  (przeniesione z poprzedniego wiersza)"
+        else:
+            tag = ""
         print(f"  {name:20s} = {cell!r}{tag}")
+    if carried:
+        print(f"\n  i Przeniesiono z poprzedniego wiersza: {', '.join(carried)} "
+              f"(wylaczenie: --no-carry).")
 
     if args.dry_run:
         print("\n--dry-run: nie zapisano.")

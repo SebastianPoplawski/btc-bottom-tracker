@@ -214,6 +214,22 @@
       - **Dash (`app_dash.py`) celowo zostaje bottom-only** (filter_side z kroku 13) —
         parytet wariantu Dash poza zakresem 13–18; nie blokuje deployu (Streamlit only).
       - **138 testów zielonych** (UI bez nowych testów jednostkowych — smoke renderem).
+- [x] **19 — `add_reading.py` v13 (pętla tygodniowa)** — ZROBIONE (luka wykryta po
+      wdrożeniu: skrypt nie znał pól v13, a `halving_date` z nowego wiersza „gasił"
+      licznik halvingu):
+      - Nowe flagi: **`--halving-date`** (→ `halving_date`), **`--etf-flows`**
+        (→ `etf_flows_usd_7d`; przecinek dziesiętny normalizowany). `AUTO_FIELDS`
+        rozszerzone o MA Pi Cycle i makro FRED (ostrzeżenie przy próbie ręcznego wpisu).
+      - **Auto-przenoszenie dat cyklu:** przy DOPISYWANIU nowego wiersza puste
+        `ath_date`/`halving_date` kopiują się z NAJNOWSZEGO istniejącego wiersza
+        (po dacie, nie po pozycji). Jawna wartość > przeniesiona > pusta. Wyłączenie:
+        `--no-carry`. Przy AKTUALIZACJI istniejącego wiersza nic nie jest przenoszone.
+      - Refaktor: logika wiersza w czystej funkcji `plan_row(header, values, provided,
+        carry)` — testowalna bez sieci. Testy: `tests/test_add_reading.py` (10).
+        **148 testów zielonych.**
+      - **Pętla tygodniowa bez zmian w składni** — daty cyklu jadą teraz same:
+        `python scripts/add_reading.py --mvrv … --nupl … [--whale TRUE/FALSE]
+        [--etf-flows -230000000]`.
 
 ---
 
