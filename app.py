@@ -180,7 +180,7 @@ def main() -> None:
 
     ui.dual_composite_summary(result, top_result)
     st.divider()
-    ui.indicator_grid(result)                       # karty dna (jak dotąd)
+    ui.indicator_grid(result, fng_gauge=True)       # karty dna (+ zegar F&G)
     st.divider()
     ui.indicator_grid(top_result, title=T.SECTION_TOP,
                       threshold_prefix="próg szczytu:",

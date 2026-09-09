@@ -103,6 +103,59 @@ def _gauge_fig(weighted_ratio: Optional[float]):
     return fig
 
 
+# Pasma Fear & Greed — tinty COLOR_MET/COLOR_UNMET, żeby zegar mówił tym samym
+# językiem co karty (strach = zielony po stronie dna, chciwość = czerwony).
+_FNG_BANDS = (
+    "rgba(31,157,85,0.45)",    # skrajny strach — sygnał dna
+    "rgba(31,157,85,0.20)",    # strach
+    "#23272f",                 # neutralnie
+    "rgba(192,86,59,0.20)",    # chciwość
+    "rgba(192,86,59,0.45)",    # skrajna chciwość
+)
+
+
+def fng_gauge_fig(value: Optional[float], fear_threshold: float = 25,
+                  greed_threshold: float = 75):
+    """Zegar Fear & Greed (0–100) — pasma nastroju + znacznik progu dna.
+    value is None -> pokaż 0 z adnotacją (jak `_gauge_fig`)."""
+    import plotly.graph_objects as go
+    missing = value is None or value != value  # None albo NaN
+    # Sam gauge, bez liczby — wartość jest już w nagłówku karty (btt-card-val).
+    fig = go.Figure(go.Indicator(
+        mode="gauge",
+        value=0 if missing else float(value),
+        gauge={
+            "axis": {"range": [0, 100], "tickcolor": "#9aa0aa"},
+            "bar": {"color": T.ACCENT, "thickness": 0.7},
+            "borderwidth": 0,
+            "steps": [
+                {"range": [0, fear_threshold], "color": _FNG_BANDS[0]},
+                {"range": [fear_threshold, 45], "color": _FNG_BANDS[1]},
+                {"range": [45, 55], "color": _FNG_BANDS[2]},
+                {"range": [55, greed_threshold], "color": _FNG_BANDS[3]},
+                {"range": [greed_threshold, 100], "color": _FNG_BANDS[4]},
+            ],
+            # Znacznik = próg dna (F&G < 25 = pasmo Extreme Fear).
+            "threshold": {
+                "line": {"color": T.COLOR_MET, "width": 3},
+                "thickness": 0.85,
+                "value": fear_threshold,
+            },
+        },
+    ))
+    fig.update_layout(
+        height=170, margin=dict(l=15, r=15, t=10, b=0),
+        paper_bgcolor="rgba(0,0,0,0)", font={"color": "#FAFAFA"},
+    )
+    if missing:
+        fig.add_annotation(
+            text="brak danych", showarrow=False,
+            x=0.5, y=0.0, xref="paper", yref="paper",
+            font={"color": "#9aa0aa", "size": 12},
+        )
+    return fig
+
+
 def composite_summary(result: Any) -> None:
     col_g, col_v = st.columns([0.42, 0.58])
     with col_g:
@@ -158,24 +211,28 @@ def dual_composite_summary(bottom: Any, top: Any) -> None:
 # --------------------------------------------------------------------------- #
 def indicator_grid(result: Any, columns: int = 3, title: str = T.SECTION_SIGNALS,
                    threshold_prefix: str = "próg dna:",
-                   help_map: Optional[dict] = None) -> None:
+                   help_map: Optional[dict] = None,
+                   fng_gauge: bool = False) -> None:
     """Siatka kart wskaźników. Od kroku 17 parametryzowana (strony top/macro
     podają własny tytuł, prefiks progu i mapę pomocy) — wywołanie bez
-    argumentów zachowuje się jak przed krokiem 17 (strona dna)."""
+    argumentów zachowuje się jak przed krokiem 17 (strona dna).
+    `fng_gauge=True` dokłada zegar nastroju do karty `fear_greed`."""
     st.subheader(title)
     indicators = [i for i in result.indicators if i.active]
     inactive = [i for i in result.indicators if not i.active]
     cols = st.columns(columns)
     for idx, ind in enumerate(indicators):
         _indicator_card(cols[idx % columns], ind, threshold_prefix,
-                        help_map if help_map is not None else T.INDICATOR_HELP)
+                        help_map if help_map is not None else T.INDICATOR_HELP,
+                        fng_gauge=fng_gauge)
     if inactive:
         st.caption("Nieaktywne progi (poza composite): "
                    + ", ".join(i.label for i in inactive))
 
 
 def _indicator_card(container, ind: Any, threshold_prefix: str = "próg dna:",
-                    help_map: Optional[dict] = None) -> None:
+                    help_map: Optional[dict] = None,
+                    fng_gauge: bool = False) -> None:
     color = _met_color(ind.met)
     label_met = T.MET_LABEL[ind.met]
     # Stopniowy F&G: spełniony, ale z wkładem częściowym (0 < contribution < weight).
@@ -197,6 +254,15 @@ def _indicator_card(container, ind: Any, threshold_prefix: str = "próg dna:",
             f"<div class='btt-card-thr'>{threshold_prefix} {thr_str}</div>",
             unsafe_allow_html=True,
         )
+        if fng_gauge and ind.indicator == "fear_greed":
+            st.plotly_chart(
+                fng_gauge_fig(ind.value, fear_threshold=(ind.threshold_value
+                                                         if ind.threshold_value is not None
+                                                         else 25)),
+                use_container_width=True,
+                config={"displayModeBar": False},
+                key="fng_gauge_card",
+            )
         if help_txt:
             st.caption(help_txt)
 
@@ -215,6 +281,55 @@ def macro_panel(result: Any) -> None:
 # --------------------------------------------------------------------------- #
 # Wykresy historii
 # --------------------------------------------------------------------------- #
+def price_ma_fng_fig(history: Any):
+    """Cena + 200W MA (lewa oś USD) i Fear & Greed (prawa oś 0–100, pasmo dna
+    < 25). connectgaps=False — dziury w historii mają zostać dziurami.
+    Zwraca None, gdy nie ma czego rysować."""
+    import plotly.graph_objects as go
+    if history is None or getattr(history, "empty", True):
+        return None
+
+    def _has(col: str) -> bool:
+        return col in history.columns and history[col].notna().any()
+
+    if not (_has("price_usd") or _has("ma_200w")):
+        return None
+
+    x = (history["reading_date"] if "reading_date" in history.columns
+         else list(range(len(history))))
+
+    fig = go.Figure()
+    for col, label, color in (("price_usd", "Cena BTC", T.ACCENT),
+                              ("ma_200w", "200W MA", "#6fb1ff")):
+        if _has(col):
+            fig.add_trace(go.Scatter(
+                x=x, y=history[col], mode="lines+markers", name=label,
+                line={"color": color}, connectgaps=False,
+            ))
+    if _has("fear_greed"):
+        fig.add_trace(go.Scatter(
+            x=x, y=history["fear_greed"], mode="lines+markers",
+            name="Fear & Greed", yaxis="y2",
+            line={"color": "#5fd3a3", "width": 1.5}, connectgaps=False,
+        ))
+        # Pasmo Extreme Fear (< 25) na prawej osi — tło sygnału dna.
+        fig.add_shape(
+            type="rect", xref="paper", yref="y2", x0=0, x1=1, y0=0, y1=25,
+            fillcolor="rgba(31,157,85,0.12)", line={"width": 0}, layer="below",
+        )
+
+    fig.update_layout(
+        title="Cena vs 200W MA + Fear & Greed", template="plotly_dark", height=300,
+        margin=dict(l=10, r=10, t=40, b=10),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", y=-0.2),
+        yaxis=dict(title="USD"),
+        yaxis2=dict(title="F&G", range=[0, 100], overlaying="y", side="right",
+                    showgrid=False, fixedrange=True),
+    )
+    return fig
+
+
 def history_charts(history_df: Any) -> None:
     st.subheader(T.SECTION_CHARTS)
     if history_df is None or getattr(history_df, "empty", True):
@@ -251,15 +366,17 @@ def history_charts(history_df: Any) -> None:
 
     c1, c2 = st.columns(2)
     with c1:
-        _line([("price_usd", "Cena BTC", T.ACCENT),
-               ("ma_200w", "200W MA", "#6fb1ff")], "Cena vs 200W MA")
+        fig_pmf = price_ma_fng_fig(history_df)
+        if fig_pmf is not None:
+            st.plotly_chart(fig_pmf, use_container_width=True,
+                            config={"displayModeBar": False})
         _line([("mvrv_z_score", "MVRV Z", "#f5c451"),
                ("nupl", "NUPL", "#9b8cff")], "MVRV Z / NUPL")
         _line([("price_usd", "Cena BTC", T.ACCENT),
                ("ma_111d", "111DMA", "#5fd3a3"),
                ("_pi_2x350", "2× 350DMA", "#ff8c6b")], "Pi Cycle Top (111DMA vs 2× 350DMA)")
     with c2:
-        _line([("fear_greed", "Fear & Greed", "#5fd3a3")], "Fear & Greed")
+        # F&G ma własny przebieg na prawej osi wykresu ceny — osobny wykres zbędny.
         _line([("whale_ratio", "Whale Ratio (ref.)", "#ff8c6b")], "Whale Ratio (referencyjnie)")
         _line([("fed_funds_rate", "Stopa Fed", "#f5c451"),
                ("dxy_proxy", "Dollar index (proxy)", "#6fb1ff"),
